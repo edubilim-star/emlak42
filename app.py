@@ -25,6 +25,8 @@ def login(client: Client) -> None:
         try:
             result = client.auth.sign_in_with_password({"email": email, "password": password})
             st.session_state.user = result.user
+            st.session_state.supabase_access_token = result.session.access_token
+            st.session_state.supabase_refresh_token = result.session.refresh_token
             st.rerun()
         except Exception:
             st.error("Giriş yapılamadı. E-posta ve şifrenizi kontrol edin.")
@@ -101,6 +103,26 @@ def main() -> None:
         login(client)
         st.stop()
 
+    # Streamlit reruns the script and creates a fresh Supabase client each time.
+    # Restore this browser session's auth tokens so protected profile reads use
+    # the authenticated role instead of silently querying as anon.
+    try:
+        client.auth.set_session(
+            st.session_state.supabase_access_token,
+            st.session_state.supabase_refresh_token,
+        )
+        current_session = client.auth.get_session()
+        if current_session:
+            st.session_state.supabase_access_token = current_session.access_token
+            st.session_state.supabase_refresh_token = current_session.refresh_token
+    except Exception:
+        st.session_state.pop("user", None)
+        st.session_state.pop("supabase_access_token", None)
+        st.session_state.pop("supabase_refresh_token", None)
+        st.warning("Oturum süresi dolmuş. Lütfen yeniden giriş yapın.")
+        login(client)
+        st.stop()
+
     user = st.session_state.user
     try:
         staff_rows = rows(client, "profiles")
@@ -144,6 +166,8 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         if st.button("Çıkış yap"):
             client.auth.sign_out()
             st.session_state.pop("user", None)
+            st.session_state.pop("supabase_access_token", None)
+            st.session_state.pop("supabase_refresh_token", None)
             st.rerun()
 
     if mine:
