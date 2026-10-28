@@ -6,6 +6,7 @@ from uuid import uuid4
 from urllib.parse import parse_qs, quote, urlparse
 import re
 from html import escape
+import json
 
 import pandas as pd
 import requests
@@ -325,9 +326,11 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_dat
         category = c2.selectbox("Emlak tipi", ["Daire", "Rezidans", "Müstakil ev", "Villa", "Yazlık", "İşyeri", "Arsa", "Bina", "Turistik tesis"])
         deal_type = c3.selectbox("İlan tipi", ["Kiralık", "Satılık"])
         c4, c5, c6 = st.columns(3)
-        city = c4.selectbox("İl *", provinces, key="new_property_city") if provinces else c4.text_input("İl *", key="new_property_city_text")
+        city_default = provinces.index("Konya") if "Konya" in provinces else 0
+        city = c4.selectbox("İl *", provinces, index=city_default, key="new_property_city") if provinces else c4.text_input("İl *", key="new_property_city_text")
         district_options = districts_by_province.get(city, []) if provinces else []
-        district = c5.selectbox("İlçe *", district_options, key=f"new_property_district_{city}") if district_options else c5.text_input("İlçe *", key=f"new_property_district_text_{city}")
+        district_default = district_options.index("Meram") if city == "Konya" and "Meram" in district_options else 0
+        district = c5.selectbox("İlçe *", district_options, index=district_default, key=f"new_property_district_{city}") if district_options else c5.text_input("İlçe *", key=f"new_property_district_text_{city}")
         price = c6.number_input("Fiyat (₺)", min_value=0, step=1000)
         c7, c8, c9 = st.columns(3)
         rooms = c7.selectbox("Oda sayısı", ["Belirtilmedi", "Stüdyo (1+0)", "1+1", "2+1", "3+1", "4+1", "5+1", "Diğer"])
@@ -360,7 +363,7 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_dat
         address = st.text_input("Açık adres / konum tarifi", placeholder="Mahalle, cadde, bina no")
         google_query = ", ".join(part for part in [address, district, city, "Türkiye"] if part)
         google_search_url = f"https://www.google.com/maps/search/?api=1&query={quote(google_query)}"
-        st.link_button("📍 Google Haritalar'da adresi bul / seç", google_search_url, use_container_width=True)
+        st.components.v1.iframe(f"https://maps.google.com/maps?q={quote(google_query)}&output=embed", height=260, scrolling=False)
         maps_url = st.text_input("Haritalar paylaşım bağlantısı (konumu seçtikten sonra yapıştırın)", placeholder="Google Maps → Paylaş → Bağlantıyı kopyala")
         latitude, longitude = parse_google_maps_location(maps_url) if maps_url else (None, None)
         if latitude and longitude:
@@ -609,7 +612,13 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         requests["sorumlu"] = requests.owner_id.map(staff_names).fillna("Atanmamış")
 
     with st.sidebar:
-        st.markdown("## 🏠 Ofis Portföyü")
+        if st.button("🏠 Ofis Portföyü · Ana sayfa", use_container_width=True):
+            st.session_state.pop("selected_property_id", None)
+            st.rerun()
+        st.markdown("### Bölümler")
+        for section in ["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"]:
+            st.caption("• " + section)
+        st.caption("Yedekleme ve düzenleme, Daireler bölümünde.")
         st.caption(user.email)
         mine = st.toggle("Yalnızca benim kayıtlarım", value=False)
         if st.button("Çıkış yap"):
@@ -622,6 +631,9 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     if mine:
         properties = properties[properties.owner_id == user.id] if not properties.empty else properties
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
+    if st.button("🏠 Ofis Portföyü", key="home_title"):
+        st.session_state.pop("selected_property_id", None)
+        st.rerun()
     st.title("Ofis genel görünümü")
     st.caption("Daireler ve müşteri talepleri ekip tarafından güncel tutulur.")
     save_notice = st.session_state.pop("property_save_notice", None)
@@ -638,6 +650,21 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     tabs = st.tabs(tab_names)
     tab1, tab2, tab3, tab4 = tabs[:4]
     with tab1:
+        if not properties.empty:
+            backup_payload = {"format": "ofis-portfoy-backup-v1", "properties": properties.drop(columns=["sorumlu"], errors="ignore").to_dict("records")}
+            st.download_button("İlanları yedekle (JSON)", json.dumps(backup_payload, ensure_ascii=False, default=str, indent=2), "ilan_yedegi.json", "application/json")
+        backup_file = st.file_uploader("Yedek dosyasından ilanları geri yükle", type=["json"], key="property_backup_upload")
+        if backup_file and st.button("İlan yedeğini yükle", key="restore_property_backup"):
+            try:
+                data = json.load(backup_file)
+                backup_rows = data.get("properties", [])
+                allowed = {"title", "city", "district", "deal_type", "price", "rooms", "area_m2", "net_area_m2", "property_category", "building_age", "floor", "total_floors", "heating", "bathroom_count", "kitchen", "balcony", "elevator", "parking", "furnished", "usage_status", "within_complex", "complex_name", "monthly_dues", "title_deed_status", "loan_eligible", "swap_allowed", "address", "description", "maps_url", "latitude", "longitude", "status", "owner_id", "created_by"}
+                for row in backup_rows:
+                    client.table("properties").insert({k: v for k, v in row.items() if k in allowed}).execute()
+                st.success(f"{len(backup_rows)} ilan geri yüklendi.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Yedek yüklenemedi: {exc}")
         search = st.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
         c1, c2 = st.columns(2)
         deal_filter = c1.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
@@ -647,6 +674,19 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         detail_row = properties[properties.id.astype(str) == str(selected_property_id)] if selected_property_id and not properties.empty else pd.DataFrame()
         if not detail_row.empty:
             show_property_detail(client, detail_row.iloc[0])
+            with st.expander("İlanı düzenle"):
+                editable = detail_row.iloc[0]
+                edit_title = st.text_input("İlan başlığı", str(editable.get("title") or ""), key="edit_title")
+                edit_city = st.text_input("İl", str(editable.get("city") or ""), key="edit_city")
+                edit_district = st.text_input("İlçe", str(editable.get("district") or ""), key="edit_district")
+                edit_price = st.number_input("Fiyat (₺)", min_value=0, value=int(editable.get("price") or 0), key="edit_price")
+                edit_status = st.selectbox("Durum", ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"], index=["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"].index(editable.get("status")) if editable.get("status") in ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"] else 0, key="edit_status")
+                edit_address = st.text_input("Adres", str(editable.get("address") or ""), key="edit_address")
+                st.components.v1.iframe(f"https://maps.google.com/maps?q={quote(', '.join([edit_address, edit_district, edit_city]))}&output=embed", height=240, scrolling=False)
+                if st.button("Değişiklikleri kaydet", type="primary"):
+                    client.table("properties").update({"title": edit_title, "city": edit_city, "district": edit_district, "price": edit_price, "status": edit_status, "address": edit_address}).eq("id", str(editable.id)).execute()
+                    st.success("İlan güncellendi.")
+                    st.rerun()
         elif not view.empty:
             if search:
                 mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False)).any(axis=1)
