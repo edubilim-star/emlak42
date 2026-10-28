@@ -88,32 +88,176 @@ def show_property_gallery(client: Client, property_id: str) -> None:
         st.caption(str(exc))
 
 
+def get_property_photos(client: Client, property_id: str) -> list[dict]:
+    bucket = client.storage.from_(PHOTO_BUCKET)
+    objects = bucket.list(property_id, {"limit": 100, "sortBy": {"column": "name", "order": "asc"}})
+    photos = []
+    for obj in objects or []:
+        if not obj.get("id"):
+            continue
+        path = f"{property_id}/{obj['name']}"
+        response = bucket.create_signed_url(path, 3600)
+        url = response.get("signedURL") or response.get("signedUrl")
+        if url:
+            photos.append({"name": obj["name"], "url": url})
+    return photos
+
+
+def show_property_detail(client: Client, property_row: pd.Series) -> None:
+    property_id = str(property_row.id)
+    if st.button("← İlan listesine dön"):
+        st.session_state.pop("selected_property_id", None)
+        st.rerun()
+    st.markdown(f"## {property_row.title}")
+    st.caption(f"{property_row.get('property_category') or 'Daire'} · {property_row.get('city', '')} / {property_row.get('district', '')} · İlan No: {property_id[:8].upper()}")
+    left, right = st.columns([1.6, 1], gap="large")
+    try:
+        photos = get_property_photos(client, property_id)
+    except Exception as exc:
+        photos = []
+        st.warning("Fotoğraf galerisi yüklenemedi. Storage kurulumu kontrol edilmeli.")
+        st.caption(str(exc))
+    with left:
+        if photos:
+            selected_photo = st.selectbox("Fotoğraf", list(range(len(photos))), format_func=lambda i: f"{i + 1} / {len(photos)} — {photos[i]['name']}", label_visibility="collapsed", key=f"detail_photo_{property_id}")
+            st.image(photos[selected_photo]["url"], width="stretch")
+            thumb_cols = st.columns(min(len(photos), 5))
+            for i, photo in enumerate(photos[:5]):
+                thumb_cols[i].image(photo["url"], caption=f"{i + 1}", width="stretch")
+        else:
+            st.info("Bu ilana fotoğraf eklenmemiş.")
+        more_photos = st.file_uploader("Bu ilana fotoğraf ekle", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"detail_upload_{property_id}")
+        if st.button("Fotoğrafları yükle", disabled=not more_photos, key=f"detail_upload_button_{property_id}"):
+            count, errors = upload_property_photos(client, property_id, more_photos or [])
+            if count:
+                st.success(f"{count} fotoğraf yüklendi.")
+                st.rerun()
+            for error in errors:
+                st.error(error)
+    with right:
+        amount = f"{int(property_row.get('price') or 0):,}".replace(",", ".")
+        st.markdown(f"# {amount} ₺")
+        st.markdown(f"**{property_row.get('deal_type', '')}** · {property_row.get('rooms') or 'Oda bilgisi yok'}")
+        st.markdown(f"**{property_row.get('city', '')} / {property_row.get('district', '')}**")
+        st.markdown(f"Sorumlu: **{property_row.get('sorumlu', 'Atanmamış')}**")
+        st.markdown(f"İlan durumu: **{property_row.get('status', 'Aktif')}**")
+        with st.container(border=True):
+            detail_rows = [
+                ("Emlak tipi", property_row.get("property_category")),
+                ("Brüt / net m²", f"{property_row.get('area_m2') or '—'} / {property_row.get('net_area_m2') or '—'}"),
+                ("Oda sayısı", property_row.get("rooms")),
+                ("Bina yaşı", property_row.get("building_age")),
+                ("Bulunduğu kat", property_row.get("floor")),
+                ("Kat sayısı", property_row.get("total_floors")),
+                ("Isıtma", property_row.get("heating")),
+                ("Banyo", property_row.get("bathroom_count")),
+                ("Mutfak", property_row.get("kitchen")),
+                ("Balkon", "Var" if property_row.get("balcony") else "Yok"),
+                ("Asansör", "Var" if property_row.get("elevator") else "Yok"),
+                ("Otopark", property_row.get("parking")),
+                ("Eşyalı", "Evet" if property_row.get("furnished") else "Hayır"),
+                ("Kullanım durumu", property_row.get("usage_status")),
+                ("Site içerisinde", "Evet" if property_row.get("within_complex") else "Hayır"),
+                ("Site adı", property_row.get("complex_name")),
+                ("Aidat", f"{int(property_row.get('monthly_dues') or 0):,}".replace(",", ".") + " ₺"),
+                ("Tapu durumu", property_row.get("title_deed_status")),
+                ("Krediye uygun", "Evet" if property_row.get("loan_eligible") else "Hayır"),
+                ("Takas", "Evet" if property_row.get("swap_allowed") else "Hayır"),
+            ]
+            for label, value in detail_rows:
+                if value not in (None, ""):
+                    a, b = st.columns([1, 1.3])
+                    a.caption(label)
+                    b.write(value)
+    details_tab, location_tab = st.tabs(["İlan detayları", "Konum ve bölge bilgisi"])
+    with details_tab:
+        st.subheader("Açıklama")
+        st.write(property_row.get("description") or property_row.get("notes") or "Bu ilan için açıklama girilmemiş.")
+    with location_tab:
+        st.subheader("Konum ve bölge bilgisi")
+        st.write(f"{property_row.get('city', '')} / {property_row.get('district', '')}")
+        st.write(property_row.get("address") or "Açık adres belirtilmemiş.")
+
+
 def add_property(client: Client, user_id: str, staff: pd.DataFrame) -> None:
     with st.form("property_form", clear_on_submit=True):
-        st.subheader("Yeni daire ekle")
+        st.subheader("Yeni ilan ekle")
         c1, c2, c3 = st.columns(3)
-        title = c1.text_input("İlan başlığı *", placeholder="2+1 daire, Çankaya")
-        city = c2.text_input("İl *")
-        district = c3.text_input("İlçe *")
+        title = c1.text_input("İlan başlığı *", placeholder="Deniz manzaralı 2+1 daire")
+        category = c2.selectbox("Emlak tipi", ["Daire", "Rezidans", "Müstakil ev", "Villa", "Yazlık", "İşyeri", "Arsa", "Bina", "Turistik tesis"])
+        deal_type = c3.selectbox("İlan tipi", ["Kiralık", "Satılık"])
         c4, c5, c6 = st.columns(3)
-        kind = c4.selectbox("İşlem", ["Kiralık", "Satılık"])
-        price = c5.number_input("Fiyat (₺)", min_value=0, step=1000)
-        rooms = c6.selectbox("Oda sayısı", ["Belirtilmedi", "1+0", "1+1", "2+1", "3+1", "4+1", "Diğer"])
-        c7, c8 = st.columns(2)
-        area = c7.number_input("Brüt m²", min_value=0, step=5)
-        status = c8.selectbox("Durum", ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
+        city = c4.text_input("İl *")
+        district = c5.text_input("İlçe / mahalle *")
+        price = c6.number_input("Fiyat (₺)", min_value=0, step=1000)
+        c7, c8, c9 = st.columns(3)
+        rooms = c7.selectbox("Oda sayısı", ["Belirtilmedi", "Stüdyo (1+0)", "1+1", "2+1", "3+1", "4+1", "5+1", "Diğer"])
+        gross_area = c8.number_input("Brüt m²", min_value=0, step=5)
+        net_area = c9.number_input("Net m²", min_value=0, step=5)
+        c10, c11, c12 = st.columns(3)
+        building_age = c10.selectbox("Bina yaşı", ["Belirtilmemiş", "0", "1", "2", "3", "4", "5-10", "11-15", "16-20", "21+"])
+        floor = c11.selectbox("Bulunduğu kat", ["Belirtilmemiş", "Bodrum", "Giriş", "Bahçe katı", "Yüksek giriş", "1", "2", "3", "4", "5", "6-10", "11+", "Çatı"])
+        total_floors = c12.number_input("Binadaki kat sayısı", min_value=0, step=1)
+        c13, c14, c15 = st.columns(3)
+        heating = c13.selectbox("Isıtma", ["Belirtilmemiş", "Kombi (Doğalgaz)", "Merkezi", "Yerden ısıtma", "Klima", "Soba", "Diğer"])
+        bathrooms = c14.number_input("Banyo sayısı", min_value=0, step=1, value=1)
+        kitchen = c15.selectbox("Mutfak", ["Belirtilmemiş", "Açık (Amerikan)", "Kapalı"])
+        c16, c17, c18 = st.columns(3)
+        balcony = c16.checkbox("Balkon")
+        elevator = c17.checkbox("Asansör")
+        furnished = c18.checkbox("Eşyalı")
+        c19, c20, c21 = st.columns(3)
+        parking = c19.selectbox("Otopark", ["Yok", "Açık", "Kapalı", "Açık ve kapalı"])
+        usage_status = c20.selectbox("Kullanım durumu", ["Boş", "Kiracılı", "Mal sahibi oturuyor"])
+        within_complex = c21.checkbox("Site içerisinde")
+        c22, c23, c24 = st.columns(3)
+        complex_name = c22.text_input("Site adı")
+        dues = c23.number_input("Aylık aidat (₺)", min_value=0, step=100)
+        title_deed = c24.selectbox("Tapu durumu", ["Belirtilmemiş", "Kat mülkiyetli", "Kat irtifaklı", "Arsa tapulu", "Hisseli", "Diğer"])
+        c25, c26, c27 = st.columns(3)
+        loan_eligible = c25.checkbox("Krediye uygun")
+        swap_allowed = c26.checkbox("Takas değerlendirilir")
+        status = c27.selectbox("İlan durumu", ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
+        address = st.text_input("Açık adres / konum tarifi")
+        description = st.text_area("İlan açıklaması", height=150)
         owner = st.selectbox("Sorumlu çalışan", staff["id"].tolist(), format_func=lambda x: staff.loc[staff.id == x, "name"].iloc[0])
-        notes = st.text_area("Notlar")
+        photos = st.file_uploader("İlan fotoğrafları * (JPG, PNG veya WebP; her biri en fazla 10 MB)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="new_property_photos")
         saved = st.form_submit_button("Daireyi kaydet", type="primary")
     if saved:
         if not title or not city or not district:
             st.error("Başlık, il ve ilçe alanlarını doldurun.")
             return
-        result = client.table("properties").insert({"title": title, "city": city, "district": district, "deal_type": kind, "price": int(price), "rooms": rooms, "area_m2": int(area), "status": status, "notes": notes, "owner_id": owner, "created_by": user_id}).select("id").single().execute()
-        property_id = str(result.data["id"])
-        st.session_state.last_created_property_id = property_id
-        st.success("Daire kaydedildi. Fotoğrafları Daireler sekmesinden ekleyebilirsiniz.")
-        st.rerun()
+        if not photos:
+            st.error("İlanı kaydetmek için en az bir fotoğraf ekleyin.")
+            return
+        if len(photos) > 20:
+            st.error("Bir ilana en fazla 20 fotoğraf ekleyebilirsiniz.")
+            return
+        invalid = [f.name for f in photos if f.type not in {"image/jpeg", "image/png", "image/webp"} or len(f.getvalue()) > MAX_PHOTO_BYTES]
+        if invalid:
+            st.error("Fotoğrafları kontrol edin (JPG, PNG veya WebP; her biri en fazla 10 MB): " + ", ".join(invalid))
+            return
+        payload = {
+            "title": title, "city": city, "district": district, "deal_type": deal_type,
+            "price": int(price), "rooms": rooms, "area_m2": int(gross_area), "net_area_m2": int(net_area),
+            "property_category": category, "building_age": building_age, "floor": floor,
+            "total_floors": int(total_floors), "heating": heating, "bathroom_count": int(bathrooms),
+            "kitchen": kitchen, "balcony": balcony, "elevator": elevator, "parking": parking,
+            "furnished": furnished, "usage_status": usage_status, "within_complex": within_complex,
+            "complex_name": complex_name, "monthly_dues": int(dues), "title_deed_status": title_deed,
+            "loan_eligible": loan_eligible, "swap_allowed": swap_allowed, "address": address,
+            "description": description, "status": status, "owner_id": owner, "created_by": user_id,
+        }
+        try:
+            result = client.table("properties").insert(payload).select("id").single().execute()
+            property_id = str(result.data["id"])
+            count, errors = upload_property_photos(client, property_id, photos)
+            st.session_state.property_save_notice = {"uploaded": count, "errors": errors}
+            st.session_state.selected_property_id = property_id
+            st.rerun()
+        except Exception as exc:
+            st.error("İlan kaydedilemedi. Yeni ilan alanlarının Supabase migration'ının çalıştırıldığını kontrol edin.")
+            st.caption(str(exc))
 
 
 def add_request(client: Client, user_id: str, staff: pd.DataFrame) -> None:
@@ -319,6 +463,11 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
     st.title("Ofis genel görünümü")
     st.caption("Daireler ve müşteri talepleri ekip tarafından güncel tutulur.")
+    save_notice = st.session_state.pop("property_save_notice", None)
+    if save_notice:
+        st.success(f"İlan kaydedildi; {save_notice['uploaded']} fotoğraf yüklendi.")
+        for error in save_notice["errors"]:
+            st.error(error)
     m1, m2, m3, m4 = st.columns(4)
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
@@ -338,7 +487,11 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         deal_filter = c1.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
         status_filter = c2.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
         view = properties.copy()
-        if not view.empty:
+        selected_property_id = st.session_state.get("selected_property_id")
+        detail_row = properties[properties.id.astype(str) == str(selected_property_id)] if selected_property_id and not properties.empty else pd.DataFrame()
+        if not detail_row.empty:
+            show_property_detail(client, detail_row.iloc[0])
+        elif not view.empty:
             if search:
                 mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False)).any(axis=1)
                 view = view[mask]
@@ -347,22 +500,13 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
             if status_filter != "Tümü":
                 view = view[view.status == status_filter]
             columns = [c for c in ["title", "deal_type", "city", "district", "rooms", "area_m2", "price", "status", "sorumlu"] if c in view]
-            st.dataframe(view[columns], hide_index=True, use_container_width=True)
-            st.markdown("### İlan fotoğrafları")
-            selected_property_id = st.selectbox(
-                "Fotoğraflarını görüntüle veya fotoğraf ekle",
-                view.id.astype(str).tolist(),
-                format_func=lambda ident: f"{view.loc[view.id.astype(str) == ident, 'title'].iloc[0]} — {view.loc[view.id.astype(str) == ident, 'city'].iloc[0]}, {view.loc[view.id.astype(str) == ident, 'district'].iloc[0]}",
-            )
-            files = st.file_uploader("Fotoğraf seç (JPG, PNG, WebP; her biri en fazla 10 MB)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"photos_{selected_property_id}")
-            if st.button("Seçilen fotoğrafları ilana ekle", type="primary", disabled=not files):
-                count, errors = upload_property_photos(client, selected_property_id, files or [])
-                if count:
-                    st.success(f"{count} fotoğraf yüklendi.")
-                    st.rerun()
-                for error in errors:
-                    st.error(error)
-            show_property_gallery(client, selected_property_id)
+            st.caption("Detay sayfasını açmak için bir ilan satırına tıklayın.")
+            selection = st.dataframe(view.reset_index(drop=True)[columns], hide_index=True, use_container_width=True, on_select="rerun", selection_mode="single-row")
+            selected_rows = selection.selection.rows
+            if selected_rows:
+                selected = view.reset_index(drop=True).iloc[selected_rows[0]]
+                st.session_state.selected_property_id = str(selected.id)
+                st.rerun()
         else:
             st.info("Henüz daire kaydı yok.")
     with tab2:

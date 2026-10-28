@@ -1,0 +1,23 @@
+-- Mevcut ilan tablosuna sahibinden tarzı detay alanlarını ekler.
+alter table public.properties
+  add column if not exists net_area_m2 integer,
+  add column if not exists property_category text not null default 'Daire',
+  add column if not exists building_age text,
+  add column if not exists floor text,
+  add column if not exists total_floors integer,
+  add column if not exists heating text,
+  add column if not exists bathroom_count integer not null default 1,
+  add column if not exists kitchen text,
+  add column if not exists balcony boolean not null default false,
+  add column if not exists elevator boolean not null default false,
+  add column if not exists parking text,
+  add column if not exists furnished boolean not null default false,
+  add column if not exists usage_status text,
+  add column if not exists within_complex boolean not null default false,
+  add column if not exists complex_name text,
+  add column if not exists monthly_dues bigint not null default 0,
+  add column if not exists title_deed_status text,
+  add column if not exists loan_eligible boolean not null default false,
+  add column if not exists swap_allowed boolean not null default false,
+  add column if not exists address text,
+  add column if not exists description text;

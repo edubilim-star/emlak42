@@ -20,6 +20,27 @@ create table public.properties (
   price bigint not null default 0,
   rooms text,
   area_m2 integer,
+  net_area_m2 integer,
+  property_category text not null default 'Daire',
+  building_age text,
+  floor text,
+  total_floors integer,
+  heating text,
+  bathroom_count integer not null default 1,
+  kitchen text,
+  balcony boolean not null default false,
+  elevator boolean not null default false,
+  parking text,
+  furnished boolean not null default false,
+  usage_status text,
+  within_complex boolean not null default false,
+  complex_name text,
+  monthly_dues bigint not null default 0,
+  title_deed_status text,
+  loan_eligible boolean not null default false,
+  swap_allowed boolean not null default false,
+  address text,
+  description text,
   status text not null default 'Aktif' check (status in ('Aktif', 'Opsiyonlu', 'Kiralandı/Satıldı', 'Pasif')),
   notes text,
   owner_id uuid not null references public.profiles(id),
@@ -67,3 +88,16 @@ create policy "signed-in users read requests" on public.requests for select to a
 create policy "signed-in users add requests" on public.requests for insert to authenticated with check (created_by = auth.uid());
 create policy "signed-in users update requests" on public.requests for update to authenticated using (true) with check (true);
 create policy "signed-in users delete requests" on public.requests for delete to authenticated using (true);
+
+-- İlan fotoğrafları: özel bucket, yalnızca giriş yapmış ofis çalışanları.
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('property-photos', 'property-photos', false, 10485760, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set public = false, file_size_limit = 10485760, allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp'];
+
+drop policy if exists "office users view property photos" on storage.objects;
+create policy "office users view property photos" on storage.objects
+for select to authenticated using (bucket_id = 'property-photos');
+
+drop policy if exists "office users upload property photos" on storage.objects;
+create policy "office users upload property photos" on storage.objects
+for insert to authenticated with check (bucket_id = 'property-photos');
