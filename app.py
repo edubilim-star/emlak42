@@ -103,7 +103,8 @@ def admin_panel(client: Client, admin_client: Client, staff: pd.DataFrame, user_
     st.subheader("Çalışan hesapları")
     st.caption("Yeni kullanıcı oluşturabilir, çalışan bilgilerini düzenleyebilir veya hesabı geçici olarak devre dışı bırakabilirsiniz.")
     try:
-        auth_users = admin_client.auth.admin.list_users().users
+        listed_users = admin_client.auth.admin.list_users()
+        auth_users = listed_users if isinstance(listed_users, list) else listed_users.users
         user_emails = {str(u.id): u.email for u in auth_users}
     except Exception as exc:
         st.error("Auth kullanıcı listesi okunamadı. Admin key ayarını kontrol edin.")
