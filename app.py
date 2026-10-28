@@ -102,16 +102,30 @@ def main() -> None:
         st.stop()
 
     user = st.session_state.user
-    staff_rows = rows(client, "profiles")
+    try:
+        staff_rows = rows(client, "profiles")
+    except Exception as exc:
+        st.error("`profiles` tablosu okunamadı. Supabase API erişim izni veya tablo kurulumu kontrol edilmeli.")
+        st.code(str(exc))
+        st.stop()
     staff = pd.DataFrame(staff_rows)
-    if staff.empty or user.id not in staff.get("id", pd.Series(dtype=str)).astype(str).tolist():
-        st.error("Giriş yaptığınız kullanıcı için çalışan profili bulunamadı veya Supabase bu profile erişemiyor.")
-        st.markdown("### Kontrol adımları")
-        st.markdown("1. Supabase **Authentication → Users** bölümünden giriş yaptığınız hesabın **User UID** değerini kopyalayın.\n2. **SQL Editor**'da aşağıdaki sorguda UUID ve adı değiştirip çalıştırın.\n3. Uygulamadan çıkış yapıp yeniden giriş yapın.")
-        st.code("""insert into public.profiles (id, name, is_admin)
-values ('KOPYALADIGINIZ_USER_UID', 'Adınız Soyadınız', true)
+    current_id = str(user.id)
+    matching_profile = not staff.empty and current_id in staff.get("id", pd.Series(dtype=str)).astype(str).tolist()
+    if not matching_profile:
+        st.error("Bu Supabase projesindeki `profiles` tablosunda oturum kullanıcınızın UUID’si bulunamadı.")
+        st.markdown("### Hızlı eşleştirme kontrolü")
+        st.markdown("Aşağıdaki sorguları **Streamlit Secrets’ta tanımlı olan aynı Supabase projesinin** SQL Editor’ında çalıştırın.")
+        st.write("Uygulamada giriş yapan kullanıcı UUID’si:")
+        st.code(current_id)
+        st.write("1. Bu UUID satır döndürüyor mu?")
+        st.code(f"select id, email from auth.users where id = '{current_id}';", language="sql")
+        st.write("2. Bu UUID için profil var mı?")
+        st.code(f"select id, name from public.profiles where id = '{current_id}';", language="sql")
+        st.write("3. Profil yoksa yalnızca şu sorguyu çalıştırın:")
+        st.code(f"""insert into public.profiles (id, name, is_admin)
+values ('{current_id}', 'Adınız Soyadınız', true)
 on conflict (id) do update set name = excluded.name;""", language="sql")
-        st.caption("İlk çalışan için is_admin true; normal çalışanlar için false yazın. UUID, oturum açtığınız hesabın UUID'siyle aynı olmalı.")
+        st.caption("2. sorgu satır döndürüyorsa ama uygulama hâlâ bulamıyorsa, uygulamanın Supabase Project URL’si SQL Editor’da açık projenin URL’siyle aynı değildir. `42P07 relation already exists` burada çalıştırılacak sorgu değildir; `create table` içeren tam kurulum dosyasını tekrar çalıştırmayın.")
         st.stop()
     properties = pd.DataFrame(rows(client, "properties"))
     requests = pd.DataFrame(rows(client, "requests"))
