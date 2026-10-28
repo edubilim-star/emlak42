@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eef4ff"/><stop offset="1" stop-color="#dbe7f5"/></linearGradient></defs>
+  <rect width="1200" height="760" fill="url(#bg)"/>
+  <rect x="310" y="170" width="580" height="430" rx="20" fill="#fff" stroke="#b8c7d9" stroke-width="12"/>
+  <path d="M260 330 600 90l340 240" fill="none" stroke="#7890aa" stroke-width="26" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="405" y="365" width="135" height="235" rx="8" fill="#dce7f2"/>
+  <rect x="625" y="365" width="165" height="130" rx="8" fill="#dce7f2"/>
+  <text x="600" y="690" text-anchor="middle" font-family="Arial,sans-serif" font-size="36" fill="#52657b">Henüz ilan fotoğrafı eklenmemiş</text>
+</svg>
