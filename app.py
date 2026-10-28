@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -8,6 +10,8 @@ from supabase import Client, create_client
 
 
 st.set_page_config(page_title="Ofis Portföyü", page_icon="🏠", layout="wide")
+PHOTO_BUCKET = "property-photos"
+MAX_PHOTO_BYTES = 10 * 1024 * 1024
 
 
 def get_client() -> Client:
@@ -43,6 +47,47 @@ def rows(client: Client, table: str) -> list[dict]:
     return client.table(table).select("*").order("created_at", desc=True).execute().data
 
 
+def upload_property_photos(client: Client, property_id: str, files: list) -> tuple[int, list[str]]:
+    uploaded = 0
+    errors = []
+    bucket = client.storage.from_(PHOTO_BUCKET)
+    for image in files:
+        content = image.getvalue()
+        if image.type not in {"image/jpeg", "image/png", "image/webp"}:
+            errors.append(f"{image.name}: JPG, PNG veya WebP yükleyin.")
+            continue
+        if len(content) > MAX_PHOTO_BYTES:
+            errors.append(f"{image.name}: dosya 10 MB sınırını aşıyor.")
+            continue
+        suffix = Path(image.name).suffix.lower()
+        object_path = f"{property_id}/{uuid4().hex}{suffix}"
+        try:
+            bucket.upload(object_path, content, file_options={"content-type": image.type, "upsert": "false"})
+            uploaded += 1
+        except Exception as exc:
+            errors.append(f"{image.name}: {exc}")
+    return uploaded, errors
+
+
+def show_property_gallery(client: Client, property_id: str) -> None:
+    try:
+        bucket = client.storage.from_(PHOTO_BUCKET)
+        objects = bucket.list(property_id)
+        if not objects:
+            st.info("Bu ilana henüz fotoğraf eklenmemiş.")
+            return
+        columns = st.columns(3)
+        for i, obj in enumerate(objects):
+            path = f"{property_id}/{obj['name']}"
+            response = bucket.create_signed_url(path, 3600)
+            url = response.get("signedURL") or response.get("signedUrl")
+            if url:
+                columns[i % 3].image(url, caption=obj["name"], width="stretch")
+    except Exception as exc:
+        st.error("Fotoğraflar alınamadı. Supabase Storage bucket ve erişim kurulumunu kontrol edin.")
+        st.caption(str(exc))
+
+
 def add_property(client: Client, user_id: str, staff: pd.DataFrame) -> None:
     with st.form("property_form", clear_on_submit=True):
         st.subheader("Yeni daire ekle")
@@ -64,8 +109,10 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame) -> None:
         if not title or not city or not district:
             st.error("Başlık, il ve ilçe alanlarını doldurun.")
             return
-        client.table("properties").insert({"title": title, "city": city, "district": district, "deal_type": kind, "price": int(price), "rooms": rooms, "area_m2": int(area), "status": status, "notes": notes, "owner_id": owner, "created_by": user_id}).execute()
-        st.success("Daire kaydedildi.")
+        result = client.table("properties").insert({"title": title, "city": city, "district": district, "deal_type": kind, "price": int(price), "rooms": rooms, "area_m2": int(area), "status": status, "notes": notes, "owner_id": owner, "created_by": user_id}).select("id").single().execute()
+        property_id = str(result.data["id"])
+        st.session_state.last_created_property_id = property_id
+        st.success("Daire kaydedildi. Fotoğrafları Daireler sekmesinden ekleyebilirsiniz.")
         st.rerun()
 
 
@@ -301,6 +348,21 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
                 view = view[view.status == status_filter]
             columns = [c for c in ["title", "deal_type", "city", "district", "rooms", "area_m2", "price", "status", "sorumlu"] if c in view]
             st.dataframe(view[columns], hide_index=True, use_container_width=True)
+            st.markdown("### İlan fotoğrafları")
+            selected_property_id = st.selectbox(
+                "Fotoğraflarını görüntüle veya fotoğraf ekle",
+                view.id.astype(str).tolist(),
+                format_func=lambda ident: f"{view.loc[view.id.astype(str) == ident, 'title'].iloc[0]} — {view.loc[view.id.astype(str) == ident, 'city'].iloc[0]}, {view.loc[view.id.astype(str) == ident, 'district'].iloc[0]}",
+            )
+            files = st.file_uploader("Fotoğraf seç (JPG, PNG, WebP; her biri en fazla 10 MB)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"photos_{selected_property_id}")
+            if st.button("Seçilen fotoğrafları ilana ekle", type="primary", disabled=not files):
+                count, errors = upload_property_photos(client, selected_property_id, files or [])
+                if count:
+                    st.success(f"{count} fotoğraf yüklendi.")
+                    st.rerun()
+                for error in errors:
+                    st.error(error)
+            show_property_gallery(client, selected_property_id)
         else:
             st.info("Henüz daire kaydı yok.")
     with tab2:
