@@ -104,8 +104,14 @@ def main() -> None:
     user = st.session_state.user
     staff_rows = rows(client, "profiles")
     staff = pd.DataFrame(staff_rows)
-    if staff.empty:
-        st.error("Çalışan profili bulunamadı. Kurulum rehberindeki profil adımını tamamlayın.")
+    if staff.empty or user.id not in staff.get("id", pd.Series(dtype=str)).astype(str).tolist():
+        st.error("Giriş yaptığınız kullanıcı için çalışan profili bulunamadı veya Supabase bu profile erişemiyor.")
+        st.markdown("### Kontrol adımları")
+        st.markdown("1. Supabase **Authentication → Users** bölümünden giriş yaptığınız hesabın **User UID** değerini kopyalayın.\n2. **SQL Editor**'da aşağıdaki sorguda UUID ve adı değiştirip çalıştırın.\n3. Uygulamadan çıkış yapıp yeniden giriş yapın.")
+        st.code("""insert into public.profiles (id, name, is_admin)
+values ('KOPYALADIGINIZ_USER_UID', 'Adınız Soyadınız', true)
+on conflict (id) do update set name = excluded.name;""", language="sql")
+        st.caption("İlk çalışan için is_admin true; normal çalışanlar için false yazın. UUID, oturum açtığınız hesabın UUID'siyle aynı olmalı.")
         st.stop()
     properties = pd.DataFrame(rows(client, "properties"))
     requests = pd.DataFrame(rows(client, "requests"))
