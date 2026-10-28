@@ -5,10 +5,12 @@ from pathlib import Path
 from uuid import uuid4
 from urllib.parse import parse_qs, quote, urlparse
 import re
+from html import escape
 
 import pandas as pd
 import requests
 import streamlit as st
+from streamlit_image_coordinates import streamlit_image_coordinates
 from supabase import Client, create_client
 
 
@@ -174,6 +176,33 @@ def get_property_photos(client: Client, property_id: str) -> list[dict]:
     return photos
 
 
+def set_gallery_photo(photo_key: str, photo_index: int, photo_count: int) -> None:
+    st.session_state[photo_key] = (photo_index + photo_count) % photo_count
+
+
+@st.dialog("İlan fotoğrafı", width="large")
+def show_photo_lightbox(photos: list[dict], photo_key: str) -> None:
+    index = st.session_state.get(photo_key, 0) % len(photos)
+    left, center, right = st.columns([1, 3, 1])
+    left.button("‹ Önceki", disabled=len(photos) < 2, key=f"lightbox_prev_{photo_key}",
+                on_click=set_gallery_photo, args=(photo_key, index - 1, len(photos)), use_container_width=True)
+    center.markdown(f"<div style='text-align:center;color:#667085;padding:.45rem'>Fotoğraf {index + 1} / {len(photos)}</div>", unsafe_allow_html=True)
+    right.button("Sonraki ›", disabled=len(photos) < 2, key=f"lightbox_next_{photo_key}",
+                 on_click=set_gallery_photo, args=(photo_key, index + 1, len(photos)), use_container_width=True)
+    st.image(photos[index]["url"], width="stretch")
+
+
+def show_clickable_property_photo(url: str, key: str, photos: list[dict], photo_key: str, photo_index: int) -> None:
+    result = streamlit_image_coordinates(url, width="stretch", key=key, cursor="zoom-in")
+    if result and result.get("timestamp") is not None:
+        click_key = f"{key}_last_click"
+        timestamp = result.get("timestamp")
+        if st.session_state.get(click_key) != timestamp:
+            st.session_state[click_key] = timestamp
+            st.session_state[photo_key] = photo_index
+            show_photo_lightbox(photos, photo_key)
+
+
 def show_property_detail(client: Client, property_row: pd.Series) -> None:
     property_id = str(property_row.id)
     if st.button("← İlan listesine dön"):
@@ -200,13 +229,11 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
             if following.button("Sonraki ›", disabled=len(photos) < 2, key=f"next_{property_id}"):
                 st.session_state[photo_key] = (photo_index + 1) % len(photos)
                 st.rerun()
-            st.markdown(f"<a href=\"{photos[photo_index]['url']}\" target=\"_blank\"><img src=\"{photos[photo_index]['url']}\" alt=\"İlan fotoğrafı\" style=\"width:100%;max-height:560px;object-fit:contain;border-radius:12px;background:#f2f4f7\"></a>", unsafe_allow_html=True)
+            show_clickable_property_photo(photos[photo_index]["url"], f"main_photo_{property_id}_{photo_index}", photos, photo_key, photo_index)
             thumb_cols = st.columns(min(len(photos), 5))
             for i, photo in enumerate(photos[:5]):
-                thumb_cols[i].image(photo["url"], caption=f"{i + 1}", width="stretch")
-                if thumb_cols[i].button("Bu fotoğrafı aç", key=f"thumb_{property_id}_{i}", use_container_width=True):
-                    st.session_state[photo_key] = i
-                    st.rerun()
+                with thumb_cols[i]:
+                    show_clickable_property_photo(photo["url"], f"thumb_photo_{property_id}_{i}", photos, photo_key, i)
         else:
             st.image(str(DEFAULT_PROPERTY_IMAGE), width="stretch", alt="İlan için varsayılan fotoğraf")
             st.caption("Bu ilana henüz fotoğraf eklenmemiş.")
@@ -220,11 +247,12 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
                 st.error(error)
     with right:
         amount = f"{int(property_row.get('price') or 0):,}".replace(",", ".")
-        st.markdown(f"# {amount} ₺")
-        st.markdown(f"**{property_row.get('deal_type', '')}** · {property_row.get('rooms') or 'Oda bilgisi yok'}")
-        st.markdown(f"**{property_row.get('city', '')} / {property_row.get('district', '')}**")
-        st.markdown(f"Sorumlu: **{property_row.get('sorumlu', 'Atanmamış')}**")
-        st.markdown(f"İlan durumu: **{property_row.get('status', 'Aktif')}**")
+        with st.container(border=True):
+            st.markdown(f"# {amount} ₺")
+            st.markdown(f"**{property_row.get('deal_type', '')}** · {property_row.get('rooms') or 'Oda bilgisi yok'}")
+            st.markdown(f"**{property_row.get('city', '')} / {property_row.get('district', '')}**")
+            st.markdown(f"Sorumlu: **{property_row.get('sorumlu', 'Atanmamış')}**")
+            st.markdown(f"İlan durumu: **{property_row.get('status', 'Aktif')}**")
         with st.container(border=True):
             detail_rows = [
                 ("Emlak tipi", property_row.get("property_category")),
@@ -248,11 +276,18 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
                 ("Krediye uygun", "Evet" if property_row.get("loan_eligible") else "Hayır"),
                 ("Takas", "Evet" if property_row.get("swap_allowed") else "Hayır"),
             ]
-            for label, value in detail_rows:
-                if value not in (None, ""):
-                    a, b = st.columns([1, 1.3])
-                    a.caption(label)
-                    b.write(value)
+            detail_rows = [(label, value) for label, value in detail_rows if value not in (None, "")]
+            table_rows = "".join(
+                f"<tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>"
+                for label, value in detail_rows
+            )
+            st.markdown(
+                "<style>.property-feature-table{width:100%;border-collapse:collapse;font-size:.92rem}"
+                ".property-feature-table th,.property-feature-table td{padding:.58rem .7rem;border-bottom:1px solid #eaecf0;text-align:left}"
+                ".property-feature-table th{width:45%;color:#475467;font-weight:600;background:#f9fafb}"
+                ".property-feature-table tr:last-child th,.property-feature-table tr:last-child td{border-bottom:0}</style>"
+                f"<table class='property-feature-table'>{table_rows}</table>", unsafe_allow_html=True
+            )
     details_tab, location_tab = st.tabs(["İlan detayları", "Konum ve bölge bilgisi"])
     with details_tab:
         st.subheader("Açıklama")
@@ -261,10 +296,23 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
         st.subheader("Konum ve bölge bilgisi")
         st.write(f"{property_row.get('city', '')} / {property_row.get('district', '')}")
         st.write(property_row.get("address") or "Açık adres belirtilmemiş.")
-        if property_row.get("maps_url"):
-            st.link_button("Google Haritalar'da aç", property_row.get("maps_url"), use_container_width=True)
-        elif property_row.get("latitude") and property_row.get("longitude"):
-            map_url = f"https://www.google.com/maps/search/?api=1&query={property_row.get('latitude')}%2C{property_row.get('longitude')}"
+        latitude, longitude = property_row.get("latitude"), property_row.get("longitude")
+        has_coordinates = (
+            pd.notna(latitude) and pd.notna(longitude)
+            and str(latitude).strip() and str(longitude).strip()
+        )
+        map_query = f"{latitude},{longitude}" if has_coordinates else ", ".join(
+            str(value) for value in (property_row.get("address"), property_row.get("district"), property_row.get("city"))
+            if pd.notna(value) and str(value).strip()
+        )
+        if map_query:
+            embed_url = f"https://maps.google.com/maps?q={quote(map_query)}&output=embed"
+            st.components.v1.iframe(embed_url, height=380, scrolling=False)
+        maps_url = property_row.get("maps_url")
+        if pd.notna(maps_url) and str(maps_url).strip():
+            st.link_button("Google Haritalar'da aç", str(maps_url), use_container_width=True)
+        elif has_coordinates:
+            map_url = f"https://www.google.com/maps/search/?api=1&query={latitude}%2C{longitude}"
             st.link_button("Google Haritalar'da aç", map_url, use_container_width=True)
 
 
