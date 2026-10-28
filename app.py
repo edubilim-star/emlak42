@@ -14,6 +14,13 @@ def get_client() -> Client:
     return create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["anon_key"])
 
 
+def get_admin_client() -> Client:
+    key = st.secrets["supabase"].get("service_role_key") or st.secrets["supabase"].get("secret_key")
+    if not key:
+        raise RuntimeError("Yönetici işlemleri için Supabase service_role/secret key ayarlanmamış.")
+    return create_client(st.secrets["supabase"]["url"], key)
+
+
 def login(client: Client) -> None:
     st.title("🏠 Ofis Portföyü")
     st.caption("Daireleri ve müşteri taleplerini tek ekranda yönetin.")
@@ -92,6 +99,88 @@ def add_request(client: Client, user_id: str, staff: pd.DataFrame) -> None:
         st.rerun()
 
 
+def admin_panel(client: Client, admin_client: Client, staff: pd.DataFrame, user_id: str) -> None:
+    st.subheader("Çalışan hesapları")
+    st.caption("Yeni kullanıcı oluşturabilir, çalışan bilgilerini düzenleyebilir veya hesabı geçici olarak devre dışı bırakabilirsiniz.")
+    try:
+        auth_users = admin_client.auth.admin.list_users().users
+        user_emails = {str(u.id): u.email for u in auth_users}
+    except Exception as exc:
+        st.error("Auth kullanıcı listesi okunamadı. Admin key ayarını kontrol edin.")
+        st.code(str(exc))
+        return
+
+    roster = staff.copy()
+    roster["E-posta"] = roster["id"].astype(str).map(user_emails).fillna("—")
+    roster["Durum"] = roster.get("is_active", True).apply(lambda active: "Aktif" if active else "Devre dışı") if isinstance(roster.get("is_active", True), pd.Series) else "Aktif"
+    roster["Rol"] = roster["is_admin"].map(lambda admin: "Yönetici" if admin else "Çalışan")
+    st.dataframe(roster[["name", "E-posta", "Rol", "Durum"]].rename(columns={"name": "Ad Soyad"}), hide_index=True, use_container_width=True)
+
+    create_tab, edit_tab = st.tabs(["Kullanıcı ekle", "Düzenle / devre dışı bırak"])
+    with create_tab:
+        with st.form("create_employee", clear_on_submit=True):
+            name = st.text_input("Ad soyad")
+            email = st.text_input("E-posta")
+            password = st.text_input("İlk şifre", type="password", help="Güçlü ve geçici bir şifre belirleyip çalışana güvenli şekilde iletin.")
+            role = st.selectbox("Yetki", ["Çalışan", "Yönetici"])
+            create = st.form_submit_button("Kullanıcı oluştur", type="primary")
+        if create:
+            if not name.strip() or not email.strip() or len(password) < 8:
+                st.error("Ad, e-posta girin ve en az 8 karakterli bir ilk şifre belirleyin.")
+            else:
+                created = None
+                try:
+                    result = admin_client.auth.admin.create_user({"email": email.strip(), "password": password, "email_confirm": True, "user_metadata": {"name": name.strip(), "display_name": name.strip()}})
+                    created = result.user
+                    admin_client.table("profiles").insert({"id": created.id, "name": name.strip(), "is_admin": role == "Yönetici", "is_active": True}).execute()
+                    st.success(f"{email.strip()} hesabı oluşturuldu.")
+                    st.rerun()
+                except Exception as exc:
+                    if created:
+                        try:
+                            admin_client.auth.admin.delete_user(str(created.id))
+                        except Exception:
+                            pass
+                    st.error("Kullanıcı oluşturulamadı. E-posta daha önce kullanılmış olabilir veya Admin key yetkisini kontrol edin.")
+                    st.code(str(exc))
+
+    with edit_tab:
+        if staff.empty:
+            st.info("Düzenlenecek kullanıcı yok.")
+            return
+        ids = staff.id.astype(str).tolist()
+        selected_id = st.selectbox("Çalışan", ids, format_func=lambda ident: f"{staff.loc[staff.id.astype(str) == ident, 'name'].iloc[0]} — {user_emails.get(ident, 'e-posta yok')}")
+        current = staff[staff.id.astype(str) == selected_id].iloc[0]
+        with st.form("edit_employee"):
+            updated_name = st.text_input("Ad soyad", value=str(current.name))
+            updated_email = st.text_input("E-posta", value=user_emails.get(selected_id, ""))
+            updated_admin = st.checkbox("Yönetici yetkisi", value=bool(current.is_admin))
+            active_default = bool(current.get("is_active", True))
+            updated_active = st.checkbox("Hesap aktif", value=active_default)
+            save = st.form_submit_button("Değişiklikleri kaydet", type="primary")
+        if save:
+            admins = staff[staff.is_admin.astype(bool)]
+            active_admins = admins[admins.get("is_active", pd.Series(True, index=admins.index)).astype(bool)]
+            if (not updated_admin or not updated_active) and selected_id in active_admins.id.astype(str).tolist() and len(active_admins) <= 1:
+                st.error("Son aktif yöneticinin yetkisi kaldırılamaz veya hesabı kapatılamaz.")
+            elif not updated_name.strip() or not updated_email.strip():
+                st.error("Ad ve e-posta boş bırakılamaz.")
+            else:
+                try:
+                    if selected_id == user_id and not updated_active:
+                        st.error("Kendi hesabınızı buradan devre dışı bırakamazsınız.")
+                        return
+                    admin_client.auth.admin.update_user_by_id(selected_id, {"email": updated_email.strip(), "user_metadata": {"name": updated_name.strip(), "display_name": updated_name.strip()}})
+                    admin_client.table("profiles").update({"name": updated_name.strip(), "is_admin": updated_admin, "is_active": updated_active}).eq("id", selected_id).execute()
+                    st.success("Çalışan bilgileri güncellendi.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("Değişiklik kaydedilemedi. Auth veya tablo izinlerini kontrol edin.")
+                    st.code(str(exc))
+
+        st.warning("Devre dışı bırakılan çalışan yeni oturum açamaz; mevcut daire ve talepleri korunur. Hesabı daha sonra yeniden etkinleştirebilirsiniz.")
+
+
 def main() -> None:
     try:
         client = get_client()
@@ -149,6 +238,15 @@ values ('{current_id}', 'Adınız Soyadınız', true)
 on conflict (id) do update set name = excluded.name;""", language="sql")
         st.caption("2. sorgu satır döndürüyorsa ama uygulama hâlâ bulamıyorsa, uygulamanın Supabase Project URL’si SQL Editor’da açık projenin URL’siyle aynı değildir. `42P07 relation already exists` burada çalıştırılacak sorgu değildir; `create table` içeren tam kurulum dosyasını tekrar çalıştırmayın.")
         st.stop()
+    me = staff[staff.id.astype(str) == current_id].iloc[0]
+    is_admin = bool(me.get("is_admin", False))
+    if not bool(me.get("is_active", True)):
+        client.auth.sign_out()
+        st.session_state.pop("user", None)
+        st.session_state.pop("supabase_access_token", None)
+        st.session_state.pop("supabase_refresh_token", None)
+        st.error("Hesabınız devre dışı bırakılmış. Ofis yöneticinizle iletişime geçin.")
+        st.stop()
     properties = pd.DataFrame(rows(client, "properties"))
     requests = pd.DataFrame(rows(client, "requests"))
     staff_names = dict(zip(staff.id, staff.name))
@@ -160,8 +258,6 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     with st.sidebar:
         st.markdown("## 🏠 Ofis Portföyü")
         st.caption(user.email)
-        me = staff[staff.id == user.id]
-        is_admin = bool(me.iloc[0].get("is_admin", False)) if not me.empty else False
         mine = st.toggle("Yalnızca benim kayıtlarım", value=False)
         if st.button("Çıkış yap"):
             client.auth.sign_out()
@@ -183,7 +279,11 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     m3.metric("Toplam talep", len(requests))
     m4.metric("Yeni talep", new_requests)
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"])
+    tab_names = ["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"]
+    if is_admin:
+        tab_names.append("Yönetici")
+    tabs = st.tabs(tab_names)
+    tab1, tab2, tab3, tab4 = tabs[:4]
     with tab1:
         search = st.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
         c1, c2 = st.columns(2)
@@ -232,6 +332,13 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         st.dataframe(pd.DataFrame(summary), hide_index=True, use_container_width=True)
         if not is_admin:
             st.caption("Çalışan listesi ofis yöneticisi tarafından Supabase profillerinden yönetilir.")
+    if is_admin:
+        with tabs[4]:
+            try:
+                admin_panel(client, get_admin_client(), staff, current_id)
+            except Exception as exc:
+                st.error("Yönetici işlemleri için Supabase service_role/secret key gerekir. Bu anahtarı Streamlit Cloud Secrets içine ekleyin; GitHub'a koymayın.")
+                st.code(str(exc))
 
 
 main()
