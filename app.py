@@ -6,6 +6,7 @@ from uuid import uuid4
 from urllib.parse import parse_qs, quote, urlparse
 import re
 from html import escape
+import inspect
 import json
 import unicodedata
 
@@ -19,6 +20,9 @@ from supabase import Client, create_client
 
 st.set_page_config(page_title="Ofis Portföyü", page_icon="🏠", layout="wide")
 PHOTO_BUCKET = "property-photos"
+_TAB_PARAMS = inspect.signature(st.tabs).parameters
+# Yeni Streamlit sürümlerinde sekmeler session_state ile kodla değiştirilebilir.
+TABS_STATE_SUPPORTED = "key" in _TAB_PARAMS and "on_change" in _TAB_PARAMS
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 DEFAULT_PROPERTY_IMAGE = Path(__file__).parent / "assets" / "no-property-photo.svg"
 
@@ -887,35 +891,47 @@ def property_delete_tools(admin_client: Client, staff: pd.DataFrame) -> None:
         finish(*delete_properties(admin_client, list(labels)))
 
 
-def switch_to_tab(name: str) -> None:
+def switch_to_tab(name: str, click_tab: bool = True) -> None:
     nonce = st.session_state.get("goto_nonce", 0)
     script = """<script>
 // __NONCE__
 const wanted = __NAME__;
+const clickTab = __CLICK__;
+const W = window.parent;
 let tries = 0;
+function press(el) {
+  ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach(type => {
+    const Ctor = type.startsWith("pointer") && W.PointerEvent ? W.PointerEvent : W.MouseEvent;
+    el.dispatchEvent(new Ctor(type, {bubbles: true, cancelable: true, view: W, button: 0}));
+  });
+}
+function collapseSidebar(doc) {
+  try {
+    if (W.innerWidth < 800) {
+      const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
+      if (collapse) collapse.click();
+    }
+    W.scrollTo(0, 0);
+  } catch (e) {}
+}
 const timer = setInterval(() => {
   tries += 1;
   let doc;
-  try { doc = window.parent.document; } catch (e) { clearInterval(timer); return; }
-  const tab = Array.from(doc.querySelectorAll('button[role="tab"]')).find(b => b.textContent.trim() === wanted);
+  try { doc = W.document; } catch (e) { clearInterval(timer); return; }
+  if (!clickTab) { collapseSidebar(doc); clearInterval(timer); return; }
+  const tab = Array.from(doc.querySelectorAll('[role="tab"]')).find(b => b.textContent.trim() === wanted);
   if (tab) {
-    tab.click();
+    press(tab);
     clearInterval(timer);
-    try {
-      if (window.parent.innerWidth < 800) {
-        const collapse = doc.querySelector('[data-testid="stSidebarCollapseButton"] button');
-        if (collapse) collapse.click();
-      }
-      window.parent.scrollTo(0, 0);
-    } catch (e) {}
-  } else if (tries > 25) { clearInterval(timer); }
+    collapseSidebar(doc);
+  } else if (tries > 30) { clearInterval(timer); }
 }, 100);
-</script>""".replace("__NONCE__", str(nonce)).replace("__NAME__", json.dumps(name))
-    st.components.v1.html(script, height=0)
+</script>""".replace("__NONCE__", str(nonce)).replace("__NAME__", json.dumps(name)).replace("__CLICK__", "true" if click_tab else "false")
+    st.components.v1.html(script, height=1)
 
 
 def go_to_section(name: str) -> None:
-    st.session_state["goto_tab"] = name
+    st.session_state["pending_tab"] = name
     st.session_state["goto_nonce"] = st.session_state.get("goto_nonce", 0) + 1
     if name == "Daireler":
         st.session_state.pop("selected_property_id", None)
@@ -1126,7 +1142,15 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
 
-    tabs = st.tabs(section_names)
+    applied_tab = st.session_state.pop("pending_tab", None)
+    if applied_tab not in section_names:
+        applied_tab = None
+    if applied_tab and TABS_STATE_SUPPORTED:
+        st.session_state["main_tabs"] = applied_tab
+    if TABS_STATE_SUPPORTED:
+        tabs = st.tabs(section_names, key="main_tabs", on_change="rerun")
+    else:
+        tabs = st.tabs(section_names)
     tab_by_name = dict(zip(section_names, tabs))
     with tab_by_name["Daireler"]:
         search = st.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
@@ -1205,9 +1229,8 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     </div>
     """, unsafe_allow_html=True)
 
-    goto_tab = st.session_state.pop("goto_tab", None)
-    if goto_tab:
-        switch_to_tab(goto_tab)
+    if applied_tab:
+        switch_to_tab(applied_tab, click_tab=not TABS_STATE_SUPPORTED)
 
 
 main()
