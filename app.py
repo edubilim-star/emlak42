@@ -31,6 +31,10 @@ st.markdown("""
   h1 { font-size: 1.65rem !important; }
   h2 { font-size: 1.35rem !important; }
 }
+.st-key-home_title button { background: none !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; min-height: 0 !important; color: inherit !important; }
+.st-key-home_title button p { font-size: 2.25rem; font-weight: 700; line-height: 1.2; }
+.st-key-home_title button:hover p { text-decoration: underline; }
+@media (max-width: 760px) { .st-key-home_title button p { font-size: 1.65rem; } }
 [class*="st-key-listing_row_"] button { text-align: left; min-height: 76px; white-space: normal; }
 .bottom-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; margin-top:1rem; }
 .summary-card { background:#fff; border:1px solid #e4e7ec; border-radius:12px; padding:.8rem 1rem; }
@@ -1107,10 +1111,9 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     if mine:
         properties = properties[properties.owner_id == user.id] if not properties.empty else properties
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
-    if st.button("🏠 Ofis Portföyü", key="home_title"):
+    if st.button("Ofis genel görünümü", key="home_title", help="Daireler bölümüne git"):
         go_to_section("Daireler")
         st.rerun()
-    st.title("Ofis genel görünümü")
     st.caption("Daireler ve müşteri talepleri ekip tarafından güncel tutulur.")
     save_notice = st.session_state.pop("property_save_notice", None)
     if save_notice:
