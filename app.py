@@ -449,6 +449,73 @@ def add_request(client: Client, user_id: str, staff: pd.DataFrame, location_data
         st.rerun()
 
 
+BACKUP_FORMAT = "ofis-portfoy-backup-v1"
+BACKUP_ALLOWED_COLUMNS = {
+    "title", "city", "district", "deal_type", "price", "rooms", "area_m2", "net_area_m2",
+    "property_category", "building_age", "floor", "total_floors", "heating", "bathroom_count",
+    "kitchen", "balcony", "elevator", "parking", "furnished", "usage_status", "within_complex",
+    "complex_name", "monthly_dues", "title_deed_status", "loan_eligible", "swap_allowed",
+    "address", "description", "maps_url", "latitude", "longitude", "status", "owner_id", "created_by",
+}
+
+
+def property_backup_tools(admin_client: Client) -> None:
+    notice = st.session_state.pop("restore_notice", None)
+    if notice:
+        st.success(notice["message"])
+        for error in notice["errors"]:
+            st.error(error)
+
+    st.markdown("#### İlanları yedekle")
+    try:
+        all_properties = rows(admin_client, "properties")
+    except Exception as exc:
+        st.error("İlanlar okunamadı.")
+        st.caption(str(exc))
+        all_properties = []
+    if all_properties:
+        payload = {"format": BACKUP_FORMAT, "properties": all_properties}
+        st.download_button(
+            f"İlanları yedekle (JSON) — {len(all_properties)} ilan",
+            json.dumps(payload, ensure_ascii=False, default=str, indent=2),
+            f"ilan_yedegi_{date.today().isoformat()}.json",
+            "application/json",
+            key="download_property_backup",
+        )
+        st.caption("Yedek, tüm ilanların kayıt bilgilerini içerir. Fotoğraflar yedeğe dahil değildir.")
+    else:
+        st.info("Yedeklenecek ilan yok.")
+
+    st.divider()
+    st.markdown("#### Yedek dosyasından ilanları geri yükle")
+    st.warning("Geri yükleme, dosyadaki ilanları yeni kayıt olarak ekler; mevcut ilanları silmez veya güncellemez. Aynı yedeği iki kez yüklerseniz ilanlar çift olur.")
+    backup_file = st.file_uploader("Yedek dosyası (JSON)", type=["json"], key="property_backup_upload")
+    if backup_file and st.button("İlan yedeğini yükle", type="primary", key="restore_property_backup"):
+        try:
+            data = json.load(backup_file)
+        except Exception as exc:
+            st.error(f"Yedek dosyası okunamadı: {exc}")
+            return
+        backup_rows = data.get("properties", []) if isinstance(data, dict) else []
+        if not backup_rows:
+            st.error("Dosyada geri yüklenecek ilan bulunamadı.")
+            return
+        restored, errors = 0, []
+        for number, row in enumerate(backup_rows, start=1):
+            try:
+                admin_client.table("properties").insert({k: v for k, v in row.items() if k in BACKUP_ALLOWED_COLUMNS}).execute()
+                restored += 1
+            except Exception as exc:
+                errors.append(f"{number}. ilan ({row.get('title') or 'başlıksız'}): {exc}")
+        st.session_state.restore_notice = {"message": f"{restored} / {len(backup_rows)} ilan geri yüklendi.", "errors": errors}
+        st.rerun()
+
+
+def go_to_section(name: str) -> None:
+    st.session_state["section"] = name
+    st.session_state.pop("selected_property_id", None)
+
+
 def admin_panel(client: Client, admin_client: Client, staff: pd.DataFrame, user_id: str) -> None:
     st.subheader("Çalışan hesapları")
     st.caption("Yeni kullanıcı oluşturabilir, çalışan bilgilerini düzenleyebilir veya hesabı geçici olarak devre dışı bırakabilirsiniz.")
@@ -467,7 +534,9 @@ def admin_panel(client: Client, admin_client: Client, staff: pd.DataFrame, user_
     roster["Rol"] = roster["is_admin"].map(lambda admin: "Yönetici" if admin else "Çalışan")
     st.dataframe(roster[["name", "E-posta", "Rol", "Durum"]].rename(columns={"name": "Ad Soyad"}), hide_index=True, use_container_width=True)
 
-    create_tab, edit_tab = st.tabs(["Kullanıcı ekle", "Düzenle / devre dışı bırak"])
+    create_tab, edit_tab, backup_tab = st.tabs(["Kullanıcı ekle", "Düzenle / devre dışı bırak", "İlan yedeği"])
+    with backup_tab:
+        property_backup_tools(admin_client)
     with create_tab:
         with st.form("create_employee", clear_on_submit=True):
             name = st.text_input("Ad soyad")
@@ -611,14 +680,21 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     if not requests.empty:
         requests["sorumlu"] = requests.owner_id.map(staff_names).fillna("Atanmamış")
 
+    section_names = ["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"]
+    if is_admin:
+        section_names.append("Yönetici")
+    if st.session_state.get("section") not in section_names:
+        st.session_state["section"] = section_names[0]
+
     with st.sidebar:
-        if st.button("🏠 Ofis Portföyü · Ana sayfa", use_container_width=True):
-            st.session_state.pop("selected_property_id", None)
-            st.rerun()
+        st.button("🏠 Ofis Portföyü · Ana sayfa", use_container_width=True, key="sidebar_home",
+                  on_click=go_to_section, args=("Daireler",))
         st.markdown("### Bölümler")
-        for section in ["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"]:
-            st.caption("• " + section)
-        st.caption("Yedekleme ve düzenleme, Daireler bölümünde.")
+        for name in section_names:
+            st.button(name, key=f"nav_{name}", use_container_width=True,
+                      type="primary" if st.session_state["section"] == name else "secondary",
+                      on_click=go_to_section, args=(name,))
+        st.caption("İlan düzenleme Daireler bölümünde; yedekleme ve geri yükleme Yönetici bölümündedir." if is_admin else "İlan düzenleme Daireler bölümündedir.")
         st.caption(user.email)
         mine = st.toggle("Yalnızca benim kayıtlarım", value=False)
         if st.button("Çıkış yap"):
@@ -632,7 +708,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         properties = properties[properties.owner_id == user.id] if not properties.empty else properties
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
     if st.button("🏠 Ofis Portföyü", key="home_title"):
-        st.session_state.pop("selected_property_id", None)
+        go_to_section("Daireler")
         st.rerun()
     st.title("Ofis genel görünümü")
     st.caption("Daireler ve müşteri talepleri ekip tarafından güncel tutulur.")
@@ -644,27 +720,8 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
 
-    tab_names = ["Daireler", "Müşteri talepleri", "Yeni kayıt", "Çalışan özeti"]
-    if is_admin:
-        tab_names.append("Yönetici")
-    tabs = st.tabs(tab_names)
-    tab1, tab2, tab3, tab4 = tabs[:4]
-    with tab1:
-        if not properties.empty:
-            backup_payload = {"format": "ofis-portfoy-backup-v1", "properties": properties.drop(columns=["sorumlu"], errors="ignore").to_dict("records")}
-            st.download_button("İlanları yedekle (JSON)", json.dumps(backup_payload, ensure_ascii=False, default=str, indent=2), "ilan_yedegi.json", "application/json")
-        backup_file = st.file_uploader("Yedek dosyasından ilanları geri yükle", type=["json"], key="property_backup_upload")
-        if backup_file and st.button("İlan yedeğini yükle", key="restore_property_backup"):
-            try:
-                data = json.load(backup_file)
-                backup_rows = data.get("properties", [])
-                allowed = {"title", "city", "district", "deal_type", "price", "rooms", "area_m2", "net_area_m2", "property_category", "building_age", "floor", "total_floors", "heating", "bathroom_count", "kitchen", "balcony", "elevator", "parking", "furnished", "usage_status", "within_complex", "complex_name", "monthly_dues", "title_deed_status", "loan_eligible", "swap_allowed", "address", "description", "maps_url", "latitude", "longitude", "status", "owner_id", "created_by"}
-                for row in backup_rows:
-                    client.table("properties").insert({k: v for k, v in row.items() if k in allowed}).execute()
-                st.success(f"{len(backup_rows)} ilan geri yüklendi.")
-                st.rerun()
-            except Exception as exc:
-                st.error(f"Yedek yüklenemedi: {exc}")
+    section = st.radio("Bölüm", section_names, key="section", horizontal=True, label_visibility="collapsed")
+    if section == "Daireler":
         search = st.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
         c1, c2 = st.columns(2)
         deal_filter = c1.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
@@ -706,7 +763,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
                         st.rerun()
         else:
             st.info("Henüz daire kaydı yok.")
-    with tab2:
+    elif section == "Müşteri talepleri":
         view = requests.copy()
         if not view.empty:
             choices = ["Yeni", "İletişimde", "Gösterim", "Tamamlandı", "İptal"]
@@ -721,13 +778,13 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
             st.dataframe(view[columns], hide_index=True, use_container_width=True)
         else:
             st.info("Henüz müşteri talebi yok.")
-    with tab3:
+    elif section == "Yeni kayıt":
         form1, form2 = st.tabs(["Daire ekle", "Talep ekle"])
         with form1:
             add_property(client, user.id, staff, location_data)
         with form2:
             add_request(client, user.id, staff, location_data)
-    with tab4:
+    elif section == "Çalışan özeti":
         summary = []
         for row in staff.to_dict("records"):
             owned_properties = properties[properties.owner_id == row["id"]] if not properties.empty else pd.DataFrame()
@@ -736,13 +793,12 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         st.dataframe(pd.DataFrame(summary), hide_index=True, use_container_width=True)
         if not is_admin:
             st.caption("Çalışan listesi ofis yöneticisi tarafından Supabase profillerinden yönetilir.")
-    if is_admin:
-        with tabs[4]:
-            try:
-                admin_panel(client, get_admin_client(), staff, current_id)
-            except Exception as exc:
-                st.error("Yönetici işlemleri için Supabase service_role/secret key gerekir. Bu anahtarı Streamlit Cloud Secrets içine ekleyin; GitHub'a koymayın.")
-                st.code(str(exc))
+    elif section == "Yönetici":
+        try:
+            admin_panel(client, get_admin_client(), staff, current_id)
+        except Exception as exc:
+            st.error("Yönetici işlemleri için Supabase service_role/secret key gerekir. Bu anahtarı Streamlit Cloud Secrets içine ekleyin; GitHub'a koymayın.")
+            st.code(str(exc))
 
     st.markdown(f"""
     <div class="bottom-summary">
