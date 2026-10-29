@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import re
 from html import escape
 import inspect
+import io
 import json
 import unicodedata
 
@@ -28,23 +29,32 @@ DEFAULT_PROPERTY_IMAGE = Path(__file__).parent / "assets" / "no-property-photo.s
 
 st.markdown("""
 <style>
+.block-container { padding-top: 2.6rem; padding-bottom: 1rem; max-width: 1320px; }
+div[data-testid="stVerticalBlock"] { gap: .6rem; }
+button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
 @media (max-width: 760px) {
-  .block-container { padding: 1rem .8rem 2rem; }
-  div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: .55rem !important; }
+  .block-container { padding: 2.2rem .8rem 1rem; }
+  div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: .45rem !important; }
   div[data-testid="stHorizontalBlock"] > div { width: 100% !important; flex: 1 1 100% !important; }
-  h1 { font-size: 1.65rem !important; }
-  h2 { font-size: 1.35rem !important; }
+  [class*="st-key-photo_grid"] div[data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; }
+  [class*="st-key-photo_grid"] div[data-testid="stHorizontalBlock"] > div { width: calc(33% - .4rem) !important; flex: 0 0 calc(33% - .4rem) !important; }
+  h1 { font-size: 1.5rem !important; }
+  h2 { font-size: 1.25rem !important; }
 }
 .st-key-home_title button { background: none !important; border: 0 !important; box-shadow: none !important; padding: 0 !important; min-height: 0 !important; color: inherit !important; }
-.st-key-home_title button p { font-size: 2.25rem; font-weight: 700; line-height: 1.2; }
+.st-key-home_title button p { font-size: 1.85rem; font-weight: 700; line-height: 1.2; }
 .st-key-home_title button:hover p { text-decoration: underline; }
-@media (max-width: 760px) { .st-key-home_title button p { font-size: 1.65rem; } }
-[class*="st-key-listing_row_"] button { text-align: left; min-height: 76px; white-space: normal; }
-.bottom-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.65rem; margin-top:1rem; }
-.summary-card { background:#fff; border:1px solid #e4e7ec; border-radius:12px; padding:.8rem 1rem; }
-.summary-label { color:#667085; font-size:.82rem; }
-.summary-value { color:#101828; font-size:1.4rem; font-weight:700; margin-top:.15rem; }
-@media(max-width:760px) { .bottom-summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:.45rem; } .summary-card { padding:.65rem; } }
+@media (max-width: 760px) { .st-key-home_title button p { font-size: 1.45rem; } }
+[class*="st-key-listing_row_"] button { text-align: left; min-height: 46px; padding: .35rem .8rem; white-space: normal; font-size: .9rem; }
+.summary-strip { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+.summary-strip .chip { background: #fff; border: 1px solid #e4e7ec; border-radius: 999px; padding: .2rem .75rem; font-size: .82rem; color: #475467; }
+.summary-strip .chip b { color: #101828; font-size: 1rem; margin-left: .35rem; }
+@media (max-width: 760px) { .summary-strip { justify-content: flex-start; } }
+.price-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: .6rem .9rem; line-height: 1.45; font-size: .9rem; }
+.price-card .price { font-size: 1.7rem; font-weight: 800; color: #1d4ed8; line-height: 1.2; }
+.property-feature-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.property-feature-table th, .property-feature-table td { padding: .28rem .55rem; border-bottom: 1px solid #eaecf0; text-align: left; }
+.property-feature-table th { width: 45%; color: #475467; font-weight: 600; background: #f9fafb; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -187,18 +197,32 @@ def get_property_photos(client: Client, property_id: str) -> list[dict]:
     return photos
 
 
+def embed_html(html: str, height: int) -> None:
+    if hasattr(st, "iframe"):
+        st.iframe(html, height=height)
+    else:
+        st.components.v1.html(html, height=height)
+
+
+def embed_page(url: str, height: int) -> None:
+    if hasattr(st, "iframe"):
+        st.iframe(url, height=height)
+    else:
+        st.components.v1.iframe(url, height=height, scrolling=False)
+
+
 GALLERY_HTML = """<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:transparent}
-.main{position:relative;height:330px;background:#101828;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
+.main{position:relative;height:290px;background:#101828;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .main img{max-width:100%;max-height:100%;object-fit:contain;cursor:zoom-in;display:block}
 .nav{position:absolute;top:50%;margin-top:-22px;width:44px;height:44px;border:0;border-radius:50%;background:rgba(255,255,255,.88);font-size:28px;line-height:1;color:#101828;cursor:pointer}
 .prev{left:8px}.next{right:8px}
 .count{position:absolute;bottom:8px;right:10px;background:rgba(0,0,0,.6);color:#fff;font-size:12px;padding:3px 9px;border-radius:12px}
 .thumbs{display:flex;gap:6px;margin-top:8px;overflow-x:auto;padding-bottom:4px}
-.thumbs img{height:62px;width:84px;object-fit:cover;border-radius:6px;border:2px solid transparent;opacity:.65;flex:none;cursor:pointer}
+.thumbs img{height:54px;width:74px;object-fit:cover;border-radius:6px;border:2px solid transparent;opacity:.65;flex:none;cursor:pointer}
 .thumbs img.active{border-color:#2563eb;opacity:1}
 .hint{font-size:12px;color:#667085;margin-top:2px}
 </style></head><body>
@@ -278,17 +302,26 @@ show(0);
 
 def render_photo_gallery(photos: list[dict]) -> None:
     urls = json.dumps([p["url"] for p in photos]).replace("</", "<\\/")
-    st.components.v1.html(GALLERY_HTML.replace("__PHOTOS__", urls), height=450)
+    embed_html(GALLERY_HTML.replace("__PHOTOS__", urls), 390)
 
 
-def show_property_detail(client: Client, property_row: pd.Series) -> None:
+def can_manage_property(row: pd.Series, user_id: str, is_admin: bool) -> bool:
+    return is_admin or str(row.get("owner_id")) == user_id or str(row.get("created_by")) == user_id
+
+
+def show_property_detail(client: Client, property_row: pd.Series, user_id: str, is_admin: bool, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
     property_id = str(property_row.id)
-    if st.button("← İlan listesine dön"):
+    manage = can_manage_property(property_row, user_id, is_admin)
+    back_col, title_col = st.columns([1, 6], vertical_alignment="center")
+    if back_col.button("← Liste", key="detail_back", use_container_width=True):
         st.session_state.pop("selected_property_id", None)
         st.rerun()
-    st.markdown(f"## {property_row.title}")
-    st.caption(f"{property_row.get('property_category') or 'Daire'} · {property_row.get('city', '')} / {property_row.get('district', '')} · İlan No: {property_id[:8].upper()}")
-    left, right = st.columns([1.6, 1], gap="large")
+    title_col.markdown(
+        f"<div style='font-size:1.25rem;font-weight:700;line-height:1.25'>{escape(str(property_row.title))}</div>"
+        f"<div style='color:#667085;font-size:.85rem'>{escape(str(property_row.get('property_category') or 'Daire'))} · {escape(str(property_row.get('city', '')))} / {escape(str(property_row.get('district', '')))} · İlan No: {property_id[:8].upper()}</div>",
+        unsafe_allow_html=True,
+    )
+    left, right = st.columns([1.5, 1], gap="medium")
     try:
         photos = get_property_photos(client, property_id)
     except Exception as exc:
@@ -301,65 +334,46 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
         else:
             st.image(str(DEFAULT_PROPERTY_IMAGE), width="stretch", alt="İlan için varsayılan fotoğraf")
             st.caption("Bu ilana henüz fotoğraf eklenmemiş.")
-        more_photos = st.file_uploader("Bu ilana fotoğraf ekle", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"detail_upload_{property_id}")
-        if st.button("Fotoğrafları yükle", disabled=not more_photos, key=f"detail_upload_button_{property_id}"):
-            count, errors = upload_property_photos(client, property_id, more_photos or [])
-            if count:
-                st.success(f"{count} fotoğraf yüklendi.")
-                st.rerun()
-            for error in errors:
-                st.error(error)
     with right:
         amount = f"{int(property_row.get('price') or 0):,}".replace(",", ".")
-        with st.container(border=True):
-            st.markdown(f"# {amount} ₺")
-            st.markdown(f"**{property_row.get('deal_type', '')}** · {property_row.get('rooms') or 'Oda bilgisi yok'}")
-            st.markdown(f"**{property_row.get('city', '')} / {property_row.get('district', '')}**")
-            st.markdown(f"Sorumlu: **{property_row.get('sorumlu', 'Atanmamış')}**")
-            st.markdown(f"İlan durumu: **{property_row.get('status', 'Aktif')}**")
-        with st.container(border=True):
-            detail_rows = [
-                ("Emlak tipi", property_row.get("property_category")),
-                ("Brüt / net m²", f"{property_row.get('area_m2') or '—'} / {property_row.get('net_area_m2') or '—'}"),
-                ("Oda sayısı", property_row.get("rooms")),
-                ("Bina yaşı", property_row.get("building_age")),
-                ("Bulunduğu kat", property_row.get("floor")),
-                ("Kat sayısı", property_row.get("total_floors")),
-                ("Isıtma", property_row.get("heating")),
-                ("Banyo", property_row.get("bathroom_count")),
-                ("Mutfak", property_row.get("kitchen")),
-                ("Balkon", "Var" if property_row.get("balcony") else "Yok"),
-                ("Asansör", "Var" if property_row.get("elevator") else "Yok"),
-                ("Otopark", property_row.get("parking")),
-                ("Eşyalı", "Evet" if property_row.get("furnished") else "Hayır"),
-                ("Kullanım durumu", property_row.get("usage_status")),
-                ("Site içerisinde", "Evet" if property_row.get("within_complex") else "Hayır"),
-                ("Site adı", property_row.get("complex_name")),
-                ("Aidat", f"{int(property_row.get('monthly_dues') or 0):,}".replace(",", ".") + " ₺"),
-                ("Tapu durumu", property_row.get("title_deed_status")),
-                ("Krediye uygun", "Evet" if property_row.get("loan_eligible") else "Hayır"),
-                ("Takas", "Evet" if property_row.get("swap_allowed") else "Hayır"),
-            ]
-            detail_rows = [(label, value) for label, value in detail_rows if value not in (None, "")]
-            table_rows = "".join(
-                f"<tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>"
-                for label, value in detail_rows
-            )
-            st.markdown(
-                "<style>.property-feature-table{width:100%;border-collapse:collapse;font-size:.92rem}"
-                ".property-feature-table th,.property-feature-table td{padding:.58rem .7rem;border-bottom:1px solid #eaecf0;text-align:left}"
-                ".property-feature-table th{width:45%;color:#475467;font-weight:600;background:#f9fafb}"
-                ".property-feature-table tr:last-child th,.property-feature-table tr:last-child td{border-bottom:0}</style>"
-                f"<table class='property-feature-table'>{table_rows}</table>", unsafe_allow_html=True
-            )
-    details_tab, location_tab = st.tabs(["İlan detayları", "Konum ve bölge bilgisi"])
-    with details_tab:
-        st.subheader("Açıklama")
+        st.markdown(
+            f"<div class='price-card'><div class='price'>{amount} ₺</div>"
+            f"<div><b>{escape(str(property_row.get('deal_type', '')))}</b> · {escape(str(property_row.get('rooms') or 'Oda bilgisi yok'))}</div>"
+            f"<div>{escape(str(property_row.get('city', '')))} / {escape(str(property_row.get('district', '')))}</div>"
+            f"<div>Sorumlu: <b>{escape(str(property_row.get('sorumlu', 'Atanmamış')))}</b> · Durum: <b>{escape(str(property_row.get('status', 'Aktif')))}</b></div></div>",
+            unsafe_allow_html=True,
+        )
+        detail_rows = [
+            ("Brüt / net m²", f"{property_row.get('area_m2') or '—'} / {property_row.get('net_area_m2') or '—'}"),
+            ("Bina yaşı", property_row.get("building_age")),
+            ("Bulunduğu kat", property_row.get("floor")),
+            ("Kat sayısı", property_row.get("total_floors")),
+            ("Isıtma", property_row.get("heating")),
+            ("Banyo", property_row.get("bathroom_count")),
+            ("Mutfak", property_row.get("kitchen")),
+            ("Balkon", "Var" if property_row.get("balcony") else "Yok"),
+            ("Asansör", "Var" if property_row.get("elevator") else "Yok"),
+            ("Otopark", property_row.get("parking")),
+            ("Eşyalı", "Evet" if property_row.get("furnished") else "Hayır"),
+            ("Kullanım durumu", property_row.get("usage_status")),
+            ("Site içerisinde", "Evet" if property_row.get("within_complex") else "Hayır"),
+            ("Site adı", property_row.get("complex_name")),
+            ("Aidat", f"{int(property_row.get('monthly_dues') or 0):,}".replace(",", ".") + " ₺"),
+            ("Tapu durumu", property_row.get("title_deed_status")),
+            ("Krediye uygun", "Evet" if property_row.get("loan_eligible") else "Hayır"),
+            ("Takas", "Evet" if property_row.get("swap_allowed") else "Hayır"),
+        ]
+        detail_rows = [(label, value) for label, value in detail_rows if value not in (None, "") and not (isinstance(value, float) and pd.isna(value))]
+        table_rows = "".join(f"<tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>" for label, value in detail_rows)
+        with st.container(height=225, border=True):
+            st.markdown(f"<table class='property-feature-table'>{table_rows}</table>", unsafe_allow_html=True)
+
+    tab_names = ["Açıklama", "Konum", "Fotoğraflar", "İndir"] + (["Düzenle", "Sil"] if manage else [])
+    detail_tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    with detail_tabs["Açıklama"]:
         st.write(property_row.get("description") or property_row.get("notes") or "Bu ilan için açıklama girilmemiş.")
-    with location_tab:
-        st.subheader("Konum ve bölge bilgisi")
-        st.write(f"{property_row.get('city', '')} / {property_row.get('district', '')}")
-        st.write(property_row.get("address") or "Açık adres belirtilmemiş.")
+    with detail_tabs["Konum"]:
+        st.write(f"{property_row.get('city', '')} / {property_row.get('district', '')} — {property_row.get('address') or 'Açık adres belirtilmemiş.'}")
         latitude, longitude = property_row.get("latitude"), property_row.get("longitude")
         has_coordinates = (
             pd.notna(latitude) and pd.notna(longitude)
@@ -371,13 +385,22 @@ def show_property_detail(client: Client, property_row: pd.Series) -> None:
         )
         if map_query:
             embed_url = f"https://maps.google.com/maps?q={quote(map_query)}&output=embed"
-            st.components.v1.iframe(embed_url, height=380, scrolling=False)
+            embed_page(embed_url, 300)
         maps_url = property_row.get("maps_url")
         if pd.notna(maps_url) and str(maps_url).strip():
             st.link_button("Google Haritalar'da aç", str(maps_url), use_container_width=True)
         elif has_coordinates:
             map_url = f"https://www.google.com/maps/search/?api=1&query={latitude}%2C{longitude}"
             st.link_button("Google Haritalar'da aç", map_url, use_container_width=True)
+    with detail_tabs["Fotoğraflar"]:
+        photos_tab_content(client, property_id, photos, manage)
+    with detail_tabs["İndir"]:
+        download_tab_content(property_row, photos)
+    if manage:
+        with detail_tabs["Düzenle"]:
+            edit_tab_content(client, property_row, is_admin, staff, location_data)
+        with detail_tabs["Sil"]:
+            delete_tab_content(client, property_row)
 
 
 USER_AGENT = {"User-Agent": "ofis-portfoy-streamlit/1.0"}
@@ -452,7 +475,7 @@ def clear_form_state(prefix: str) -> None:
                 pass
 
 
-def property_form(key: str, values: dict | None, location_data: tuple[list[str], dict[str, list[str]]], staff: pd.DataFrame, default_owner: str | None = None, owner_editable: bool = True) -> dict:
+def property_form(key: str, values: dict | None, location_data: tuple[list[str], dict[str, list[str]]], staff: pd.DataFrame, default_owner: str | None = None, owner_editable: bool = True, extra_tab: tuple | None = None) -> dict:
     provinces, districts_by_province = location_data
     values = values or {}
     is_new = not values
@@ -491,142 +514,158 @@ def property_form(key: str, values: dict | None, location_data: tuple[list[str],
         init(name, bool(raw(name, False)))
         return col.checkbox(label, key=K(name))
 
-    c1, c2, c3 = st.columns(3)
-    init("title", str(raw("title", "")))
-    title = c1.text_input("İlan başlığı *", key=K("title"), placeholder="Deniz manzaralı 2+1 daire")
-    category = pick(c2, "Emlak tipi", "category", ["Daire", "Rezidans", "Müstakil ev", "Villa", "Yazlık", "İşyeri", "Arsa", "Bina", "Turistik tesis"], "Daire", "property_category")
-    deal_type = pick(c3, "İlan tipi", "deal_type", ["Kiralık", "Satılık"], "Kiralık")
+    tab_names = ["Temel bilgiler", "Konum ve adres", "Özellikler", "Açıklama"] + ([extra_tab[0]] if extra_tab else [])
+    tabs = st.tabs(tab_names)
+    tab_basic, tab_loc, tab_feat, tab_desc = tabs[:4]
 
-    # ---- Haritadan konum seçimi ----
-    st.markdown("##### 📍 Konum")
-    st.caption("Haritada ilanın bulunduğu yere dokunarak işaretleyin; il, ilçe ve adres otomatik doldurulur. İsterseniz önce aşağıdan adres arayabilirsiniz.")
-    init("lat", float(raw("latitude")) if raw("latitude") is not None else None)
-    init("lng", float(raw("longitude")) if raw("longitude") is not None else None)
+    with tab_basic:
+        c1, c2, c3 = st.columns(3)
+        init("title", str(raw("title", "")))
+        title = c1.text_input("İlan başlığı *", key=K("title"), placeholder="Deniz manzaralı 2+1 daire")
+        category = pick(c2, "Emlak tipi", "category", ["Daire", "Rezidans", "Müstakil ev", "Villa", "Yazlık", "İşyeri", "Arsa", "Bina", "Turistik tesis"], "Daire", "property_category")
+        deal_type = pick(c3, "İlan tipi", "deal_type", ["Kiralık", "Satılık"], "Kiralık")
+        c4, c5, c6 = st.columns(3)
+        price = number(c4, "Fiyat (₺)", "price", 1000)
+        rooms = pick(c5, "Oda sayısı", "rooms", ["Belirtilmedi", "Stüdyo (1+0)", "1+1", "2+1", "3+1", "4+1", "5+1", "Diğer"], "Belirtilmedi")
+        status = pick(c6, "İlan durumu", "status", ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"], "Aktif")
+        c7, c8, c9 = st.columns(3)
+        gross_area = number(c7, "Brüt m²", "area_m2", 5)
+        net_area = number(c8, "Net m²", "net_area_m2", 5)
+        building_age = pick(c9, "Bina yaşı", "building_age", ["Belirtilmemiş", "0", "1", "2", "3", "4", "5-10", "11-15", "16-20", "21+"], "Belirtilmemiş")
 
-    def apply_pin(new_lat: float, new_lng: float, geo: dict | None = None) -> bool:
-        st.session_state[K("lat")] = float(new_lat)
-        st.session_state[K("lng")] = float(new_lng)
-        try:
-            geo = geo or reverse_geocode(round(float(new_lat), 6), round(float(new_lng), 6))
-            info = describe_location(geo, provinces, districts_by_province)
-        except Exception:
-            return False
-        if info["address"]:
-            st.session_state[K("address")] = info["address"]
-        if info["city"] and provinces:
-            st.session_state[K("city")] = info["city"]
-            if info["district"]:
-                st.session_state[K(f"district_{info['city']}")] = info["district"]
-        return True
+    with tab_loc:
+        st.caption("Haritada ilanın yerine dokunarak işaretleyin; il, ilçe ve adres otomatik dolar. İsterseniz önce adres arayabilirsiniz.")
+        init("lat", float(raw("latitude")) if raw("latitude") is not None else None)
+        init("lng", float(raw("longitude")) if raw("longitude") is not None else None)
 
-    search_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
-    query = search_col.text_input("Adres veya yer ara (isteğe bağlı)", key=K("search"), placeholder="Örn. Yeni Meram, Konya")
-    if button_col.button("Haritada bul", key=K("search_btn"), use_container_width=True):
-        if not query.strip():
-            st.warning("Aranacak adresi yazın.")
-        else:
+        def apply_pin(new_lat: float, new_lng: float, geo: dict | None = None) -> bool:
+            st.session_state[K("lat")] = float(new_lat)
+            st.session_state[K("lng")] = float(new_lng)
             try:
-                found = search_location(query.strip() + ", Türkiye")
+                geo = geo or reverse_geocode(round(float(new_lat), 6), round(float(new_lng), 6))
+                info = describe_location(geo, provinces, districts_by_province)
             except Exception:
-                found = None
-                st.warning("Adres arama servisine şu anda ulaşılamadı. Haritaya dokunarak işaretleyebilirsiniz.")
-            if found:
-                apply_pin(float(found["lat"]), float(found["lon"]), geo=found)
-                st.rerun()
-            elif found is None:
-                st.warning("Adres bulunamadı. Haritada doğrudan dokunarak işaretleyebilirsiniz.")
+                return False
+            if info["address"]:
+                st.session_state[K("address")] = info["address"]
+            if info["city"] and provinces:
+                st.session_state[K("city")] = info["city"]
+                if info["district"]:
+                    st.session_state[K(f"district_{info['city']}")] = info["district"]
+            return True
 
-    lat, lng = st.session_state.get(K("lat")), st.session_state.get(K("lng"))
-    has_pin = lat is not None and lng is not None
-    if has_pin:
-        center, zoom = (lat, lng), 16
-    else:
-        center, zoom = TURKEY_CENTER, 6
-        city_now = st.session_state.get(K("city")) or raw("city") or ("Konya" if "Konya" in provinces else None)
-        district_now = st.session_state.get(K(f"district_{city_now}")) or raw("district")
-        if city_now:
-            try:
-                found = search_location(", ".join(part for part in (district_now, city_now, "Türkiye") if part))
+        search_col, button_col = st.columns([4, 1], vertical_alignment="bottom")
+        query = search_col.text_input("Adres veya yer ara (isteğe bağlı)", key=K("search"), placeholder="Örn. Yeni Meram, Konya")
+        if button_col.button("Haritada bul", key=K("search_btn"), use_container_width=True):
+            if not query.strip():
+                st.warning("Aranacak adresi yazın.")
+            else:
+                try:
+                    found = search_location(query.strip() + ", Türkiye")
+                except Exception:
+                    found = None
+                    st.warning("Adres arama servisine şu anda ulaşılamadı. Haritaya dokunarak işaretleyebilirsiniz.")
                 if found:
-                    center, zoom = (float(found["lat"]), float(found["lon"])), (12 if district_now else 10)
-            except Exception:
-                pass
-    fmap = folium.Map(location=center, zoom_start=zoom, control_scale=True)
-    if has_pin:
-        folium.Marker([lat, lng], tooltip="Seçilen konum").add_to(fmap)
-    out = st_folium(fmap, height=380, use_container_width=True, key=K("map"), returned_objects=["last_clicked"])
-    clicked = (out or {}).get("last_clicked")
-    if clicked and clicked != st.session_state.get(K("last_click")):
-        st.session_state[K("last_click")] = clicked
-        if not apply_pin(clicked["lat"], clicked["lng"]):
-            st.session_state[K("geo_failed")] = True
+                    apply_pin(float(found["lat"]), float(found["lon"]), geo=found)
+                    st.rerun()
+                elif found is None:
+                    st.warning("Adres bulunamadı. Haritada doğrudan dokunarak işaretleyebilirsiniz.")
+
+        lat, lng = st.session_state.get(K("lat")), st.session_state.get(K("lng"))
+        has_pin = lat is not None and lng is not None
+        if has_pin:
+            center, zoom = (lat, lng), 16
         else:
-            st.session_state.pop(K("geo_failed"), None)
-        st.rerun()
-    if has_pin:
-        info_col, clear_col = st.columns([4, 1], vertical_alignment="center")
-        info_col.caption(f"📌 İşaretlenen konum: {lat:.5f}, {lng:.5f}. Adres bilgileri otomatik dolduruldu; gerekirse aşağıdan düzeltebilirsiniz.")
-        if clear_col.button("Konumu kaldır", key=K("clear_pin"), use_container_width=True):
-            st.session_state[K("lat")] = None
-            st.session_state[K("lng")] = None
+            center, zoom = TURKEY_CENTER, 6
+            city_now = st.session_state.get(K("city")) or raw("city") or ("Konya" if "Konya" in provinces else None)
+            district_now = st.session_state.get(K(f"district_{city_now}")) or raw("district")
+            if city_now:
+                try:
+                    found = search_location(", ".join(part for part in (district_now, city_now, "Türkiye") if part))
+                    if found:
+                        center, zoom = (float(found["lat"]), float(found["lon"])), (12 if district_now else 10)
+                except Exception:
+                    pass
+        fmap = folium.Map(location=center, zoom_start=zoom, control_scale=True)
+        if has_pin:
+            folium.Marker([lat, lng], tooltip="Seçilen konum").add_to(fmap)
+        out = st_folium(fmap, height=300, use_container_width=True, key=K("map"), returned_objects=["last_clicked"])
+        clicked = (out or {}).get("last_clicked")
+        if clicked and clicked != st.session_state.get(K("last_click")):
+            st.session_state[K("last_click")] = clicked
+            if not apply_pin(clicked["lat"], clicked["lng"]):
+                st.session_state[K("geo_failed")] = True
+            else:
+                st.session_state.pop(K("geo_failed"), None)
             st.rerun()
-        if st.session_state.get(K("geo_failed")):
-            st.warning("Bu noktanın adresi otomatik alınamadı; il, ilçe ve adresi elle girin. Koordinat yine de kaydedilecek.")
+        if has_pin:
+            info_col, clear_col = st.columns([4, 1], vertical_alignment="center")
+            info_col.caption(f"📌 İşaretlenen konum: {lat:.5f}, {lng:.5f}")
+            if clear_col.button("Konumu kaldır", key=K("clear_pin"), use_container_width=True):
+                st.session_state[K("lat")] = None
+                st.session_state[K("lng")] = None
+                st.rerun()
+            if st.session_state.get(K("geo_failed")):
+                st.warning("Bu noktanın adresi otomatik alınamadı; il, ilçe ve adresi elle girin. Koordinat yine de kaydedilecek.")
 
-    c4, c5, c6 = st.columns(3)
-    default_city = "Konya" if "Konya" in provinces else (provinces[0] if provinces else "")
-    if provinces:
-        province_lookup = {_norm(p): p for p in provinces}
-        init("city", province_lookup.get(_norm(raw("city", "")), default_city))
-        city = c4.selectbox("İl *", provinces, key=K("city"))
-        district_options = districts_by_province.get(city, [])
-    else:
-        init("city", str(raw("city", "")))
-        city = c4.text_input("İl *", key=K("city"))
-        district_options = []
-    if district_options:
-        district_lookup = {_norm(d): d for d in district_options}
-        guess = district_lookup.get(_norm(raw("district", ""))) or ("Meram" if is_new and city == "Konya" and "Meram" in district_options else district_options[0])
-        init(f"district_{city}", guess)
-        district = c5.selectbox("İlçe *", district_options, key=K(f"district_{city}"))
-    else:
-        init(f"district_{city}", str(raw("district", "")))
-        district = c5.text_input("İlçe *", key=K(f"district_{city}"))
-    price = number(c6, "Fiyat (₺)", "price", 1000)
+        c10, c11, c12 = st.columns([1, 1, 2])
+        default_city = "Konya" if "Konya" in provinces else (provinces[0] if provinces else "")
+        if provinces:
+            province_lookup = {_norm(p): p for p in provinces}
+            init("city", province_lookup.get(_norm(raw("city", "")), default_city))
+            city = c10.selectbox("İl *", provinces, key=K("city"))
+            district_options = districts_by_province.get(city, [])
+        else:
+            init("city", str(raw("city", "")))
+            city = c10.text_input("İl *", key=K("city"))
+            district_options = []
+        if district_options:
+            district_lookup = {_norm(d): d for d in district_options}
+            guess = district_lookup.get(_norm(raw("district", ""))) or ("Meram" if is_new and city == "Konya" and "Meram" in district_options else district_options[0])
+            init(f"district_{city}", guess)
+            district = c11.selectbox("İlçe *", district_options, key=K(f"district_{city}"))
+        else:
+            init(f"district_{city}", str(raw("district", "")))
+            district = c11.text_input("İlçe *", key=K(f"district_{city}"))
+        init("address", str(raw("address", "")))
+        address = c12.text_input("Açık adres / konum tarifi", key=K("address"), placeholder="Mahalle, cadde, bina no (haritadan otomatik dolar)")
 
-    c7, c8, c9 = st.columns(3)
-    rooms = pick(c7, "Oda sayısı", "rooms", ["Belirtilmedi", "Stüdyo (1+0)", "1+1", "2+1", "3+1", "4+1", "5+1", "Diğer"], "Belirtilmedi")
-    gross_area = number(c8, "Brüt m²", "area_m2", 5)
-    net_area = number(c9, "Net m²", "net_area_m2", 5)
-    c10, c11, c12 = st.columns(3)
-    building_age = pick(c10, "Bina yaşı", "building_age", ["Belirtilmemiş", "0", "1", "2", "3", "4", "5-10", "11-15", "16-20", "21+"], "Belirtilmemiş")
-    floor = pick(c11, "Bulunduğu kat", "floor", ["Belirtilmemiş", "Bodrum", "Giriş", "Bahçe katı", "Yüksek giriş", "1", "2", "3", "4", "5", "6-10", "11+", "Çatı"], "Belirtilmemiş")
-    total_floors = number(c12, "Binadaki kat sayısı", "total_floors")
-    c13, c14, c15 = st.columns(3)
-    heating = pick(c13, "Isıtma", "heating", ["Belirtilmemiş", "Kombi (Doğalgaz)", "Merkezi", "Yerden ısıtma", "Klima", "Soba", "Diğer"], "Belirtilmemiş")
-    bathrooms = number(c14, "Banyo sayısı", "bathroom_count", 1, default=1)
-    kitchen = pick(c15, "Mutfak", "kitchen", ["Belirtilmemiş", "Açık (Amerikan)", "Kapalı"], "Belirtilmemiş")
-    c16, c17, c18 = st.columns(3)
-    balcony = check(c16, "Balkon", "balcony")
-    elevator = check(c17, "Asansör", "elevator")
-    furnished = check(c18, "Eşyalı", "furnished")
-    c19, c20, c21 = st.columns(3)
-    parking = pick(c19, "Otopark", "parking", ["Yok", "Açık", "Kapalı", "Açık ve kapalı"], "Yok")
-    usage_status = pick(c20, "Kullanım durumu", "usage_status", ["Boş", "Kiracılı", "Mal sahibi oturuyor"], "Boş")
-    within_complex = check(c21, "Site içerisinde", "within_complex")
-    c22, c23, c24 = st.columns(3)
-    init("complex_name", str(raw("complex_name", "")))
-    complex_name = c22.text_input("Site adı", key=K("complex_name"))
-    dues = number(c23, "Aylık aidat (₺)", "monthly_dues", 100)
-    title_deed = pick(c24, "Tapu durumu", "title_deed_status", ["Belirtilmemiş", "Kat mülkiyetli", "Kat irtifaklı", "Arsa tapulu", "Hisseli", "Diğer"], "Belirtilmemiş")
-    c25, c26, c27 = st.columns(3)
-    loan_eligible = check(c25, "Krediye uygun", "loan_eligible")
-    swap_allowed = check(c26, "Takas değerlendirilir", "swap_allowed")
-    status = pick(c27, "İlan durumu", "status", ["Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"], "Aktif")
-    init("address", str(raw("address", "")))
-    address = st.text_input("Açık adres / konum tarifi", key=K("address"), placeholder="Mahalle, cadde, bina no (haritadan otomatik dolar)")
-    init("description", str(raw("description", "")))
-    description = st.text_area("İlan açıklaması", height=150, key=K("description"))
+    with tab_feat:
+        f1, f2, f3, f4 = st.columns(4)
+        floor = pick(f1, "Bulunduğu kat", "floor", ["Belirtilmemiş", "Bodrum", "Giriş", "Bahçe katı", "Yüksek giriş", "1", "2", "3", "4", "5", "6-10", "11+", "Çatı"], "Belirtilmemiş")
+        total_floors = number(f2, "Binadaki kat sayısı", "total_floors")
+        heating = pick(f3, "Isıtma", "heating", ["Belirtilmemiş", "Kombi (Doğalgaz)", "Merkezi", "Yerden ısıtma", "Klima", "Soba", "Diğer"], "Belirtilmemiş")
+        bathrooms = number(f4, "Banyo sayısı", "bathroom_count", 1, default=1)
+        g1, g2, g3, g4 = st.columns(4)
+        kitchen = pick(g1, "Mutfak", "kitchen", ["Belirtilmemiş", "Açık (Amerikan)", "Kapalı"], "Belirtilmemiş")
+        parking = pick(g2, "Otopark", "parking", ["Yok", "Açık", "Kapalı", "Açık ve kapalı"], "Yok")
+        usage_status = pick(g3, "Kullanım durumu", "usage_status", ["Boş", "Kiracılı", "Mal sahibi oturuyor"], "Boş")
+        title_deed = pick(g4, "Tapu durumu", "title_deed_status", ["Belirtilmemiş", "Kat mülkiyetli", "Kat irtifaklı", "Arsa tapulu", "Hisseli", "Diğer"], "Belirtilmemiş")
+        h1, h2, h3, h4 = st.columns(4, vertical_alignment="bottom")
+        init("complex_name", str(raw("complex_name", "")))
+        complex_name = h1.text_input("Site adı", key=K("complex_name"))
+        dues = number(h2, "Aylık aidat (₺)", "monthly_dues", 100)
+        within_complex = check(h3, "Site içerisinde", "within_complex")
+        furnished = check(h4, "Eşyalı", "furnished")
+        i1, i2, i3, i4 = st.columns(4)
+        balcony = check(i1, "Balkon", "balcony")
+        elevator = check(i2, "Asansör", "elevator")
+        loan_eligible = check(i3, "Krediye uygun", "loan_eligible")
+        swap_allowed = check(i4, "Takas değerlendirilir", "swap_allowed")
+
+    with tab_desc:
+        init("description", str(raw("description", "")))
+        description = st.text_area("İlan açıklaması", height=130, key=K("description"))
+        owner_id = None
+        if owner_editable and not staff.empty:
+            owner_ids = staff["id"].astype(str).tolist()
+            stored_owner = str(raw("owner_id", default_owner or owner_ids[0]))
+            init("owner", stored_owner if stored_owner in owner_ids else owner_ids[0])
+            owner_id = st.selectbox("Sorumlu çalışan", owner_ids, format_func=lambda x: staff.loc[staff.id.astype(str) == x, "name"].iloc[0], key=K("owner"))
+
+    if extra_tab:
+        with tabs[4]:
+            extra_tab[1]()
 
     payload = {
         "title": title.strip(), "city": city, "district": district, "deal_type": deal_type,
@@ -646,12 +685,8 @@ def property_form(key: str, values: dict | None, location_data: tuple[list[str],
         google_query = ", ".join(part for part in [address, district, city, "Türkiye"] if part)
         payload["maps_url"] = f"https://www.google.com/maps/search/?api=1&query={quote(google_query)}"
         payload["latitude"], payload["longitude"] = None, None
-
-    if owner_editable and not staff.empty:
-        owner_ids = staff["id"].astype(str).tolist()
-        stored_owner = str(raw("owner_id", default_owner or owner_ids[0]))
-        init("owner", stored_owner if stored_owner in owner_ids else owner_ids[0])
-        payload["owner_id"] = st.selectbox("Sorumlu çalışan", owner_ids, format_func=lambda x: staff.loc[staff.id.astype(str) == x, "name"].iloc[0], key=K("owner"))
+    if owner_id:
+        payload["owner_id"] = owner_id
     return payload
 
 
@@ -678,17 +713,21 @@ def delete_properties(db_client: Client, ids: list[str]) -> tuple[int, list[str]
 
 
 def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
+    holder: dict = {}
+
+    def photo_tab() -> None:
+        holder["files"] = st.file_uploader("İlan fotoğrafları * (JPG, PNG veya WebP; her biri en fazla 10 MB, en fazla 20 adet)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="np_photos")
+
     with st.container(border=True):
-        st.subheader("Yeni ilan ekle")
-        payload = property_form("np", {}, location_data, staff, default_owner=user_id)
-        photos = st.file_uploader("İlan fotoğrafları * (JPG, PNG veya WebP; her biri en fazla 10 MB)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="np_photos")
+        payload = property_form("np", {}, location_data, staff, default_owner=user_id, extra_tab=("Fotoğraflar", photo_tab))
+        photos = holder.get("files")
         saved = st.button("İlanı ve fotoğrafları kaydet", type="primary", use_container_width=True, key="save_new_property")
     if saved:
         if not payload["title"] or not payload["city"] or not payload["district"]:
-            st.error("Başlık, il ve ilçe alanlarını doldurun.")
+            st.error("Başlık (Temel bilgiler), il ve ilçe (Konum ve adres) alanlarını doldurun.")
             return
         if not photos:
-            st.error("İlanı kaydetmek için en az bir fotoğraf ekleyin.")
+            st.error("İlanı kaydetmek için Fotoğraflar sekmesinden en az bir fotoğraf ekleyin.")
             return
         if len(photos) > 20:
             st.error("Bir ilana en fazla 20 fotoğraf ekleyebilirsiniz.")
@@ -712,42 +751,328 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_dat
             st.caption(str(exc))
 
 
-def edit_property_panel(client: Client, row: pd.Series, user_id: str, is_admin: bool, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
+def edit_tab_content(client: Client, row: pd.Series, is_admin: bool, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
     property_id = str(row.id)
-    owns = str(row.get("owner_id")) == user_id or str(row.get("created_by")) == user_id
-    if not (is_admin or owns):
-        st.info("Bu ilanı yalnızca ilanı ekleyen veya sorumlu çalışan ile yöneticiler düzenleyebilir ya da silebilir.")
-        return
     prefix = f"edit_{property_id}"
-    with st.expander("✏️ İlanı düzenle"):
-        payload = property_form(prefix, row.to_dict(), location_data, staff, owner_editable=is_admin)
-        if st.button("Değişiklikleri kaydet", type="primary", use_container_width=True, key=f"{prefix}_save"):
-            if not payload["title"] or not payload["city"] or not payload["district"]:
-                st.error("Başlık, il ve ilçe alanlarını doldurun.")
-            else:
-                try:
-                    client.table("properties").update(payload).eq("id", property_id).execute()
-                    clear_form_state(prefix)
-                    st.success("İlan güncellendi.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error("İlan güncellenemedi.")
-                    st.caption(str(exc))
-    with st.expander("🗑️ İlanı sil"):
-        st.warning("İlan ve fotoğrafları kalıcı olarak silinir. Bu işlem geri alınamaz.")
-        confirm = st.checkbox("Bu ilanı silmek istediğimi onaylıyorum.", key=f"{prefix}_confirm_delete")
-        if st.button("İlanı kalıcı olarak sil", type="primary", disabled=not confirm, key=f"{prefix}_delete"):
-            deleted, errors = delete_properties(client, [property_id])
-            if deleted:
+    payload = property_form(prefix, row.to_dict(), location_data, staff, owner_editable=is_admin)
+    if st.button("Değişiklikleri kaydet", type="primary", use_container_width=True, key=f"{prefix}_save"):
+        if not payload["title"] or not payload["city"] or not payload["district"]:
+            st.error("Başlık, il ve ilçe alanlarını doldurun.")
+        else:
+            try:
+                client.table("properties").update(payload).eq("id", property_id).execute()
                 clear_form_state(prefix)
-                st.session_state.pop("selected_property_id", None)
-                st.session_state["property_delete_notice"] = "İlan silindi."
+                st.success("İlan güncellendi.")
                 st.rerun()
-            elif errors:
-                for error in errors:
-                    st.error(error)
+            except Exception as exc:
+                st.error("İlan güncellenemedi.")
+                st.caption(str(exc))
+
+
+def delete_tab_content(client: Client, row: pd.Series) -> None:
+    property_id = str(row.id)
+    prefix = f"edit_{property_id}"
+    st.warning("İlan ve fotoğrafları kalıcı olarak silinir. Bu işlem geri alınamaz.")
+    confirm = st.checkbox("Bu ilanı silmek istediğimi onaylıyorum.", key=f"{prefix}_confirm_delete")
+    if st.button("İlanı kalıcı olarak sil", type="primary", disabled=not confirm, key=f"{prefix}_delete"):
+        deleted, errors = delete_properties(client, [property_id])
+        if deleted:
+            clear_form_state(prefix)
+            st.session_state.pop("selected_property_id", None)
+            st.session_state["property_delete_notice"] = "İlan silindi."
+            st.rerun()
+        elif errors:
+            for error in errors:
+                st.error(error)
+        else:
+            st.error("İlan silinemedi. Supabase'de bu tablo için silme (DELETE) izni tanımlı olmayabilir; yöneticinizle iletişime geçin.")
+
+
+def photos_tab_content(client: Client, property_id: str, photos: list[dict], manage: bool) -> None:
+    more_photos = st.file_uploader("Bu ilana fotoğraf ekle", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key=f"detail_upload_{property_id}")
+    if st.button("Fotoğrafları yükle", disabled=not more_photos, key=f"detail_upload_button_{property_id}"):
+        count, errors = upload_property_photos(client, property_id, more_photos or [])
+        for error in errors:
+            st.error(error)
+        if count:
+            st.success(f"{count} fotoğraf yüklendi.")
+            st.rerun()
+    if not manage:
+        return
+    st.divider()
+    if not photos:
+        st.caption("Bu ilanda silinebilecek fotoğraf yok.")
+        return
+    generation = st.session_state.get(f"photo_generation_{property_id}", 0)
+    st.markdown("**Fotoğrafları sil** — silmek istediklerinizi işaretleyin")
+    chosen: list[str] = []
+    with st.container(height=280, key=f"photo_grid_{property_id}"):
+        columns = st.columns(4)
+        for index, photo in enumerate(photos):
+            with columns[index % 4]:
+                st.image(photo["url"], width=120)
+                if st.checkbox(f"Sil · {index + 1}", key=f"photo_del_{property_id}_{generation}_{index}"):
+                    chosen.append(photo["name"])
+    if st.button(f"Seçili {len(chosen)} fotoğrafı sil", type="primary", disabled=not chosen, key=f"photo_delete_button_{property_id}_{generation}"):
+        try:
+            bucket = client.storage.from_(PHOTO_BUCKET)
+            removed = bucket.remove([f"{property_id}/{name}" for name in chosen])
+        except Exception as exc:
+            st.error("Fotoğraflar silinemedi.")
+            st.caption(str(exc))
+            return
+        if not removed:
+            st.error("Fotoğraflar silinemedi. Supabase Storage'da silme izni tanımlı olmayabilir; yöneticinizle iletişime geçin.")
+            return
+        st.session_state[f"photo_generation_{property_id}"] = generation + 1
+        st.session_state["property_delete_notice"] = f"{len(removed)} fotoğraf silindi."
+        st.rerun()
+
+
+def _clean(value) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def property_fact_rows(row: pd.Series) -> list[tuple[str, str]]:
+    def money(name: str) -> str:
+        value = row.get(name)
+        try:
+            return f"{int(value):,}".replace(",", ".") + " ₺" if value not in (None, "") and not pd.isna(value) else ""
+        except (TypeError, ValueError):
+            return ""
+
+    def yes_no(name: str, yes: str = "Evet", no: str = "Hayır") -> str:
+        return yes if bool(row.get(name)) else no
+
+    facts = [
+        ("İlan no", str(row.id)[:8].upper()), ("Başlık", _clean(row.get("title"))), ("İşlem", _clean(row.get("deal_type"))),
+        ("Emlak tipi", _clean(row.get("property_category"))), ("Fiyat", money("price")), ("İl", _clean(row.get("city"))),
+        ("İlçe", _clean(row.get("district"))), ("Adres", _clean(row.get("address"))), ("Oda sayısı", _clean(row.get("rooms"))),
+        ("Brüt m²", _clean(row.get("area_m2"))), ("Net m²", _clean(row.get("net_area_m2"))), ("Bina yaşı", _clean(row.get("building_age"))),
+        ("Bulunduğu kat", _clean(row.get("floor"))), ("Binadaki kat sayısı", _clean(row.get("total_floors"))), ("Isıtma", _clean(row.get("heating"))),
+        ("Banyo sayısı", _clean(row.get("bathroom_count"))), ("Mutfak", _clean(row.get("kitchen"))), ("Balkon", yes_no("balcony", "Var", "Yok")),
+        ("Asansör", yes_no("elevator", "Var", "Yok")), ("Otopark", _clean(row.get("parking"))), ("Eşyalı", yes_no("furnished")),
+        ("Kullanım durumu", _clean(row.get("usage_status"))), ("Site içerisinde", yes_no("within_complex")), ("Site adı", _clean(row.get("complex_name"))),
+        ("Aylık aidat", money("monthly_dues")), ("Tapu durumu", _clean(row.get("title_deed_status"))), ("Krediye uygun", yes_no("loan_eligible")),
+        ("Takas", yes_no("swap_allowed")), ("Durum", _clean(row.get("status"))), ("Sorumlu", _clean(row.get("sorumlu"))),
+        ("Harita bağlantısı", _clean(row.get("maps_url"))), ("Açıklama", _clean(row.get("description"))),
+    ]
+    return [(label, value) for label, value in facts if value]
+
+
+def build_excel(facts: list[tuple[str, str]]) -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "İlan"
+    sheet.append(["Özellik", "Değer"])
+    for cell in sheet[1]:
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="1E3A8A")
+    for label, value in facts:
+        sheet.append([label, value])
+    sheet.column_dimensions["A"].width = 24
+    sheet.column_dimensions["B"].width = 80
+    for sheet_row in sheet.iter_rows(min_row=2):
+        sheet_row[0].font = Font(bold=True)
+        for cell in sheet_row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    return buffer.getvalue()
+
+
+def _font(size: int, bold: bool = False):
+    from PIL import ImageFont
+
+    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    candidates = [Path(__file__).parent / "assets" / name]
+    candidates += [Path(folder) / name for folder in ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu", "/usr/share/fonts/TTF")]
+    try:
+        import matplotlib
+        candidates.append(Path(matplotlib.get_data_path()) / "fonts" / "ttf" / name)
+    except Exception:
+        pass
+    for path in candidates:
+        if path.exists():
+            return ImageFont.truetype(str(path), size)
+    try:
+        return ImageFont.load_default(size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _wrap_text(draw, text: str, font, max_width: int) -> list[str]:
+    lines: list[str] = []
+    for paragraph in str(text).splitlines() or [""]:
+        current = ""
+        for word in paragraph.split():
+            trial = f"{current} {word}".strip()
+            if draw.textlength(trial, font=font) <= max_width:
+                current = trial
             else:
-                st.error("İlan silinemedi. Supabase'de bu tablo için silme (DELETE) izni tanımlı olmayabilir; yöneticinizle iletişime geçin.")
+                if current:
+                    lines.append(current)
+                current = word
+        lines.append(current)
+    return lines
+
+
+def _fetch_images(photos: list[dict], limit: int = 4) -> list:
+    from PIL import Image, ImageOps
+
+    images = []
+    for photo in photos[:limit]:
+        try:
+            response = requests.get(photo["url"], timeout=20)
+            response.raise_for_status()
+            image = ImageOps.exif_transpose(Image.open(io.BytesIO(response.content))).convert("RGB")
+            image.thumbnail((1600, 1600))
+            images.append(image)
+        except Exception:
+            continue
+    return images
+
+
+def render_listing_image(facts: list[tuple[str, str]], images: list):
+    from PIL import Image, ImageDraw, ImageOps
+
+    data = dict(facts)
+    width, height, margin = 1240, 1754, 60
+    page = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(page)
+    inner = width - 2 * margin
+
+    draw.rectangle([0, 0, width, 110], fill="#1e3a8a")
+    draw.text((margin, 34), "Ofis Portföyü", font=_font(40, True), fill="white")
+    id_text = f"İlan No: {data.get('İlan no', '')}"
+    id_font = _font(30)
+    draw.text((width - margin - draw.textlength(id_text, font=id_font), 44), id_text, font=id_font, fill="#dbeafe")
+
+    y = 140
+    title_font = _font(46, True)
+    for line in _wrap_text(draw, data.get("Başlık", "İlan"), title_font, inner)[:2]:
+        draw.text((margin, y), line, font=title_font, fill="#101828")
+        y += 60
+    subtitle = " · ".join(part for part in (data.get("İşlem"), data.get("Emlak tipi"), " / ".join(p for p in (data.get("İl"), data.get("İlçe")) if p)) if part)
+    draw.text((margin, y + 4), subtitle, font=_font(28), fill="#475467")
+    y += 54
+
+    price_font = _font(62, True)
+    draw.text((margin, y), data.get("Fiyat", ""), font=price_font, fill="#1d4ed8")
+    status = data.get("Durum", "")
+    if status:
+        badge_font = _font(28, True)
+        badge_width = int(draw.textlength(status, font=badge_font)) + 44
+        draw.rounded_rectangle([width - margin - badge_width, y + 10, width - margin, y + 62], radius=26, fill="#e0e7ff")
+        draw.text((width - margin - badge_width + 22, y + 18), status, font=badge_font, fill="#1e3a8a")
+    y += 96
+
+    main_height = 410
+    if images:
+        page.paste(ImageOps.fit(images[0], (inner, main_height), method=Image.LANCZOS), (margin, y))
+        y += main_height + 12
+        extra = images[1:4]
+        if extra:
+            gap = 12
+            thumb_width = (inner - gap * (len(extra) - 1)) // len(extra)
+            for index, image in enumerate(extra):
+                page.paste(ImageOps.fit(image, (thumb_width, 170), method=Image.LANCZOS), (margin + index * (thumb_width + gap), y))
+            y += 170 + 12
+    else:
+        draw.rectangle([margin, y, width - margin, y + 220], fill="#f2f4f7")
+        placeholder_font = _font(32)
+        text = "Bu ilana fotoğraf eklenmemiş"
+        draw.text(((width - draw.textlength(text, font=placeholder_font)) / 2, y + 90), text, font=placeholder_font, fill="#98a2b3")
+        y += 220 + 12
+    y += 8
+
+    skip = {"İlan no", "Başlık", "Açıklama", "Adres", "Harita bağlantısı", "Fiyat", "Sorumlu", "Durum", "İşlem", "İl", "İlçe", "Emlak tipi"}
+    grid = [(label, value) for label, value in facts if label not in skip][:22]
+    label_font, value_font = _font(22), _font(24, True)
+    column_width = inner // 2
+    row_height = 40
+    for index, (label, value) in enumerate(grid):
+        column, line = index % 2, index // 2
+        x, top = margin + column * column_width, y + line * row_height
+        if line % 2 == 0:
+            draw.rectangle([x, top, x + column_width - 8, top + row_height - 2], fill="#f9fafb")
+        draw.text((x + 12, top + 7), label, font=label_font, fill="#667085")
+        shown = value
+        while draw.textlength(shown, font=value_font) > column_width - 270 and len(shown) > 4:
+            shown = shown[:-2]
+        draw.text((x + 250, top + 5), shown + ("…" if shown != value else ""), font=value_font, fill="#101828")
+    y += ((len(grid) + 1) // 2) * row_height + 14
+
+    footer_top = height - 90
+    body_font = _font(25)
+    if data.get("Adres"):
+        for line in _wrap_text(draw, "Adres: " + data["Adres"], body_font, inner)[:2]:
+            draw.text((margin, y), line, font=body_font, fill="#344054")
+            y += 34
+        y += 6
+    description = data.get("Açıklama")
+    if description and y < footer_top - 80:
+        draw.text((margin, y), "Açıklama", font=_font(28, True), fill="#101828")
+        y += 42
+        lines = _wrap_text(draw, description, body_font, inner)
+        capacity = max(0, (footer_top - 12 - y) // 34)
+        shown_lines = lines[:capacity]
+        if len(lines) > capacity and shown_lines:
+            shown_lines[-1] = shown_lines[-1].rstrip()[:-3] + "…"
+        for line in shown_lines:
+            draw.text((margin, y), line, font=body_font, fill="#344054")
+            y += 34
+
+    draw.line([margin, footer_top, width - margin, footer_top], fill="#d0d5dd", width=2)
+    footer = f"Sorumlu: {data.get('Sorumlu', '—')}   ·   Hazırlanma tarihi: {date.today().strftime('%d.%m.%Y')}"
+    footer_font = _font(24)
+    draw.text(((width - draw.textlength(footer, font=footer_font)) / 2, footer_top + 26), footer, font=footer_font, fill="#667085")
+    return page
+
+
+def download_tab_content(row: pd.Series, photos: list[dict]) -> None:
+    property_id = str(row.id)
+    facts = property_fact_rows(row)
+    signature = f"{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
+    state_key = f"export_{property_id}"
+    prepared = st.session_state.get(state_key)
+    if prepared and prepared.get("signature") != signature:
+        prepared = None
+    c1, c2, c3 = st.columns(3)
+    try:
+        c1.download_button("📊 Excel (.xlsx)", build_excel(facts), f"ilan_{property_id[:8]}.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"dl_xlsx_{property_id}")
+    except ImportError:
+        c1.error("Excel için requirements.txt dosyasına openpyxl ekleyin.")
+    if prepared:
+        c2.download_button("📄 PDF", prepared["pdf"], f"ilan_{property_id[:8]}.pdf", "application/pdf", use_container_width=True, key=f"dl_pdf_{property_id}")
+        c3.download_button("🖼️ Resim (PNG)", prepared["png"], f"ilan_{property_id[:8]}.png", "image/png", use_container_width=True, key=f"dl_png_{property_id}")
+        st.caption("İlanı veya fotoğrafları değiştirirseniz dosyalar otomatik yenilenir; yeniden 'hazırla' demeniz gerekir.")
+    else:
+        if c2.button("PDF ve resim hazırla", use_container_width=True, key=f"prepare_export_{property_id}"):
+            try:
+                with st.spinner("Dosyalar hazırlanıyor…"):
+                    page = render_listing_image(facts, _fetch_images(photos))
+                    png, pdf = io.BytesIO(), io.BytesIO()
+                    page.save(png, "PNG")
+                    page.save(pdf, "PDF", resolution=150.0)
+                st.session_state[state_key] = {"signature": signature, "png": png.getvalue(), "pdf": pdf.getvalue()}
+                st.rerun()
+            except Exception as exc:
+                st.error("PDF/resim hazırlanamadı.")
+                st.caption(str(exc))
+        c3.caption("PDF ve PNG aynı ilan sayfasından üretilir.")
 
 
 def add_request(client: Client, user_id: str, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
@@ -927,7 +1252,7 @@ const timer = setInterval(() => {
   } else if (tries > 30) { clearInterval(timer); }
 }, 100);
 </script>""".replace("__NONCE__", str(nonce)).replace("__NAME__", json.dumps(name)).replace("__CLICK__", "true" if click_tab else "false")
-    st.components.v1.html(script, height=1)
+    embed_html(script, 1)
 
 
 def go_to_section(name: str) -> None:
@@ -1127,10 +1452,17 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     if mine:
         properties = properties[properties.owner_id == user.id] if not properties.empty else properties
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
-    if st.button("Ofis genel görünümü", key="home_title", help="Daireler bölümüne git"):
+    active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
+    new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
+    head_left, head_right = st.columns([2, 3], vertical_alignment="center")
+    if head_left.button("Ofis genel görünümü", key="home_title", help="Daireler bölümüne git"):
         go_to_section("Daireler")
         st.rerun()
-    st.caption("Daireler ve müşteri talepleri ekip tarafından güncel tutulur.")
+    head_right.markdown(
+        f"<div class='summary-strip'><span class='chip'>Daire<b>{len(properties)}</b></span><span class='chip'>Aktif<b>{active}</b></span>"
+        f"<span class='chip'>Talep<b>{len(requests)}</b></span><span class='chip'>Yeni talep<b>{new_requests}</b></span></div>",
+        unsafe_allow_html=True,
+    )
     save_notice = st.session_state.pop("property_save_notice", None)
     if save_notice:
         st.success(f"İlan kaydedildi; {save_notice['uploaded']} fotoğraf yüklendi.")
@@ -1139,8 +1471,6 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     delete_notice = st.session_state.pop("property_delete_notice", None)
     if delete_notice:
         st.success(delete_notice)
-    active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
-    new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
 
     applied_tab = st.session_state.pop("pending_tab", None)
     if applied_tab not in section_names:
@@ -1153,35 +1483,41 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         tabs = st.tabs(section_names)
     tab_by_name = dict(zip(section_names, tabs))
     with tab_by_name["Daireler"]:
-        search = st.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
-        c1, c2 = st.columns(2)
-        deal_filter = c1.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
-        status_filter = c2.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
-        view = properties.copy()
         selected_property_id = st.session_state.get("selected_property_id")
         detail_row = properties[properties.id.astype(str) == str(selected_property_id)] if selected_property_id and not properties.empty else pd.DataFrame()
         if not detail_row.empty:
-            show_property_detail(client, detail_row.iloc[0])
-            edit_property_panel(client, detail_row.iloc[0], current_id, is_admin, staff, location_data)
-        elif not view.empty:
+            show_property_detail(client, detail_row.iloc[0], current_id, is_admin, staff, location_data)
+        elif properties.empty:
+            st.info("Henüz daire kaydı yok.")
+        else:
+            f1, f2, f3 = st.columns([3, 1.3, 1.3])
+            search = f1.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
+            deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
+            status_filter = f3.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
+            view = properties.copy()
             if search:
-                mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False)).any(axis=1)
+                mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False, regex=False)).any(axis=1)
                 view = view[mask]
             if deal_filter != "Tümü":
                 view = view[view.deal_type == deal_filter]
             if status_filter != "Tümü":
                 view = view[view.status == status_filter]
-            st.caption("Detayları açmak için ilan satırının herhangi bir yerine dokunun.")
-            for item in view.to_dict("records"):
-                title = item.get("title") or "Başlıksız ilan"
-                price_text = f"{int(item.get('price') or 0):,}".replace(",", ".") + " ₺"
-                listing_line = f"🏠 İlan: {title}  |  İşlem: {item.get('deal_type', '')}  |  İl/İlçe: {item.get('city', '')} / {item.get('district', '')}  |  Oda: {item.get('rooms', '')}  |  Brüt: {item.get('area_m2') or '—'} m²  |  Fiyat: {price_text}  |  Durum: {item.get('status', '')}  |  Sorumlu: {item.get('sorumlu', '')}"
-                with st.container(key=f"listing_row_{item['id']}"):
-                    if st.button(listing_line, key=f"listing_{item['id']}", use_container_width=True):
-                        st.session_state.selected_property_id = str(item["id"])
-                        st.rerun()
-        else:
-            st.info("Henüz daire kaydı yok.")
+            st.caption(f"{len(view)} ilan · detay için satıra dokunun")
+            with st.container(height=470, border=False):
+                if view.empty:
+                    st.info("Filtreye uyan ilan yok.")
+                for item in view.to_dict("records"):
+                    price_text = f"{int(item.get('price') or 0):,}".replace(",", ".") + " ₺"
+                    area = _clean(item.get("area_m2")) or "—"
+                    listing_line = " · ".join([
+                        f"🏠 {_clean(item.get('title')) or 'Başlıksız ilan'}", _clean(item.get("deal_type")),
+                        f"{_clean(item.get('city'))} / {_clean(item.get('district'))}", _clean(item.get("rooms")),
+                        f"{area} m²", price_text, _clean(item.get("status")), _clean(item.get("sorumlu")),
+                    ])
+                    with st.container(key=f"listing_row_{item['id']}"):
+                        if st.button(listing_line, key=f"listing_{item['id']}", use_container_width=True):
+                            st.session_state.selected_property_id = str(item["id"])
+                            st.rerun()
     with tab_by_name["Müşteri talepleri"]:
         view = requests.copy()
         if not view.empty:
@@ -1219,15 +1555,6 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
             except Exception as exc:
                 st.error("Yönetici işlemleri için Supabase service_role/secret key gerekir. Bu anahtarı Streamlit Cloud Secrets içine ekleyin; GitHub'a koymayın.")
                 st.code(str(exc))
-
-    st.markdown(f"""
-    <div class="bottom-summary">
-      <div class="summary-card"><div class="summary-label">Toplam daire</div><div class="summary-value">{len(properties)}</div></div>
-      <div class="summary-card"><div class="summary-label">Aktif daire</div><div class="summary-value">{active}</div></div>
-      <div class="summary-card"><div class="summary-label">Toplam talep</div><div class="summary-value">{len(requests)}</div></div>
-      <div class="summary-card"><div class="summary-label">Yeni talep</div><div class="summary-value">{new_requests}</div></div>
-    </div>
-    """, unsafe_allow_html=True)
 
     if applied_tab:
         switch_to_tab(applied_tab, click_tab=not TABS_STATE_SUPPORTED)
