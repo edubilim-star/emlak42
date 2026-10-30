@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 from urllib.parse import parse_qs, quote, urlparse
 import re
 from html import escape
+import base64
 import inspect
+import math
+import zipfile
+from zoneinfo import ZoneInfo
 from functools import partial
 import io
 import time
@@ -29,16 +33,20 @@ _TAB_PARAMS = inspect.signature(st.tabs).parameters
 TABS_STATE_SUPPORTED = "key" in _TAB_PARAMS and "on_change" in _TAB_PARAMS
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 DOWNLOAD_CALLABLE = "callable" in (st.download_button.__doc__ or "").lower()
+TZ = ZoneInfo("Europe/Istanbul")
+DEFAULT_OFFICE_NAME = "Ofis Portföyü"
+DEFAULT_HOME_TITLE = "Ofis genel görünümü"
+NEW_SQL_FILE = "supabase_yeni_ozellikler.sql"
 OFFER_STATUSES = ["Beklemede", "Karşı teklif", "Kabul edildi", "Reddedildi", "İptal"]
 DEFAULT_PROPERTY_IMAGE = Path(__file__).parent / "assets" / "no-property-photo.svg"
 
 st.markdown("""
 <style>
-.block-container { padding-top: 2.6rem; padding-bottom: 5rem; max-width: 1320px; }
+.block-container { padding-top: 4.2rem; padding-bottom: 5rem; max-width: 1320px; }
 div[data-testid="stVerticalBlock"] { gap: .6rem; }
 button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
 @media (max-width: 760px) {
-  .block-container { padding: 2.2rem .8rem 4.5rem; }
+  .block-container { padding: 3.8rem .8rem 4.5rem; }
   div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: .45rem !important; }
   div[data-testid="stHorizontalBlock"] > div { width: 100% !important; flex: 1 1 100% !important; }
   [class*="st-key-photo_grid"] div[data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; }
@@ -76,6 +84,109 @@ def get_admin_client() -> Client:
     if not key:
         raise RuntimeError("Yönetici işlemleri için Supabase service_role/secret key ayarlanmamış.")
     return create_client(st.secrets["supabase"]["url"], key)
+
+
+def now_tr() -> datetime:
+    return datetime.now(TZ)
+
+
+def feature_setup_message(feature: str, exc: Exception | None = None) -> None:
+    st.warning(f"{feature} için Supabase'de ek tablolar gerekli. `{NEW_SQL_FILE}` dosyasını Supabase SQL Editor'da bir kez çalıştırın.")
+    path = Path(__file__).parent / NEW_SQL_FILE
+    if path.exists():
+        with st.expander("Çalıştırılacak SQL"):
+            st.code(path.read_text(encoding="utf-8"), language="sql")
+    if exc is not None:
+        st.caption(str(exc))
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_settings(_client: Client) -> dict:
+    try:
+        data = _client.table("app_settings").select("*").execute().data or []
+    except Exception:
+        return {}
+    return {item["key"]: item.get("value") for item in data}
+
+
+def load_announcements(client: Client, only_active: bool = True) -> list[dict]:
+    try:
+        query = client.table("announcements").select("*").order("created_at", desc=True)
+        if only_active:
+            query = query.eq("active", True)
+        return query.execute().data or []
+    except Exception:
+        return []
+
+
+def show_announcements(client: Client) -> None:
+    items = load_announcements(client)
+    for item in items[:3]:
+        body = f"\n\n{item['body']}" if item.get("body") else ""
+        st.info(f"**{item['title']}**{body}", icon="📢")
+    if len(items) > 3:
+        with st.expander(f"Diğer {len(items) - 3} duyuru"):
+            for item in items[3:]:
+                st.markdown(f"**{item['title']}**  \n{item.get('body') or ''}")
+
+
+def settings_admin_tab(client: Client, admin_client: Client) -> None:
+    settings = get_settings(client)
+    st.caption("Burada yazdıklarınız tüm kullanıcılarda görünür. Ofis adı sol menüde ve PDF/Excel çıktılarının başlığında kullanılır.")
+    office = st.text_input("Ofis / uygulama adı", value=settings.get("office_name") or DEFAULT_OFFICE_NAME, key="admin_office_name")
+    home = st.text_input("Ana sayfa başlığı (üstteki buton)", value=settings.get("home_title") or DEFAULT_HOME_TITLE, key="admin_home_title")
+    if st.button("Başlıkları kaydet", type="primary", key="admin_save_titles"):
+        try:
+            admin_client.table("app_settings").upsert([
+                {"key": "office_name", "value": office.strip() or DEFAULT_OFFICE_NAME},
+                {"key": "home_title", "value": home.strip() or DEFAULT_HOME_TITLE},
+            ]).execute()
+            get_settings.clear()
+            st.success("Başlıklar kaydedildi.")
+            st.rerun()
+        except Exception as exc:
+            feature_setup_message("Başlık ayarları", exc)
+
+
+def announcements_admin_tab(admin_client: Client) -> None:
+    try:
+        items = admin_client.table("announcements").select("*").order("created_at", desc=True).execute().data or []
+    except Exception as exc:
+        feature_setup_message("Duyurular", exc)
+        return
+    generation = st.session_state.get("news_generation", 0)
+
+    def bump() -> None:
+        st.session_state["news_generation"] = generation + 1
+
+    with st.expander("➕ Yeni duyuru ekle", expanded=not items):
+        title = st.text_input("Duyuru başlığı *", key=f"news_title_{generation}")
+        body = st.text_area("Duyuru metni", height=90, key=f"news_body_{generation}")
+        if st.button("Duyuruyu yayınla", type="primary", key=f"news_add_{generation}"):
+            if not title.strip():
+                st.error("Duyuru başlığını yazın.")
+            else:
+                admin_client.table("announcements").insert({"title": title.strip(), "body": body.strip(), "active": True}).execute()
+                bump()
+                st.rerun()
+    for item in items:
+        item_id = str(item["id"])
+        created = pd.to_datetime(item.get("created_at"), errors="coerce")
+        stamp = created.strftime("%d.%m.%Y") if pd.notna(created) else ""
+        with st.expander(f"{'🟢' if item.get('active') else '⚪'} {item['title']} · {stamp}"):
+            new_title = st.text_input("Başlık", value=item["title"], key=f"news_edit_title_{item_id}_{generation}")
+            new_body = st.text_area("Metin", value=item.get("body") or "", height=90, key=f"news_edit_body_{item_id}_{generation}")
+            active = st.checkbox("Yayında (kullanıcılara gösterilsin)", value=bool(item.get("active")), key=f"news_edit_active_{item_id}_{generation}")
+            b1, b2, b3 = st.columns([1, 1, 1], vertical_alignment="center")
+            if b1.button("Güncelle", type="primary", key=f"news_update_{item_id}_{generation}", use_container_width=True):
+                admin_client.table("announcements").update({"title": new_title.strip(), "body": new_body.strip(), "active": active, "updated_at": now_tr().isoformat()}).eq("id", item_id).execute()
+                bump()
+                st.rerun()
+            confirm = b2.checkbox("Silmeyi onaylıyorum", key=f"news_confirm_{item_id}_{generation}")
+            if b3.button("Duyuruyu sil", disabled=not confirm, key=f"news_delete_{item_id}_{generation}", use_container_width=True):
+                admin_client.table("announcements").delete().eq("id", item_id).execute()
+                bump()
+                st.rerun()
 
 
 def service_client(fallback: Client) -> Client:
@@ -324,13 +435,16 @@ def can_manage_property(row: pd.Series, user_id: str, is_admin: bool) -> bool:
     return is_admin or str(row.get("owner_id")) == user_id or str(row.get("created_by")) == user_id
 
 
-def show_property_detail(client: Client, property_row: pd.Series, user_id: str, is_admin: bool, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
+def show_property_detail(client: Client, property_row: pd.Series, user_id: str, is_admin: bool, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]], favorites: set[str]) -> None:
     property_id = str(property_row.id)
     manage = can_manage_property(property_row, user_id, is_admin)
-    back_col, title_col = st.columns([1, 6], vertical_alignment="center")
+    back_col, fav_col, title_col = st.columns([1, 1.8, 4.5], vertical_alignment="center")
     if back_col.button("← Liste", key="detail_back", use_container_width=True):
         st.session_state.pop("selected_property_id", None)
         st.rerun()
+    is_favorite = property_id in favorites
+    fav_col.button("★ Favorilerden kaldır" if is_favorite else "☆ Favorilere ekle", key=f"fav_{property_id}", use_container_width=True,
+                   type="primary" if is_favorite else "secondary", on_click=set_favorite, args=(client, user_id, property_id, not is_favorite))
     title_col.markdown(
         f"<div style='font-size:1.25rem;font-weight:700;line-height:1.25'>{escape(str(property_row.title))}</div>"
         f"<div style='color:#667085;font-size:.85rem'>{escape(str(property_row.get('property_category') or 'Daire'))} · {escape(str(property_row.get('city', '')))} / {escape(str(property_row.get('district', '')))} · İlan No: {property_id[:8].upper()}</div>",
@@ -382,10 +496,12 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
         table_rows = "".join(f"<tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>" for label, value in detail_rows)
         st.markdown(f"<table class='property-feature-table'>{table_rows}</table>", unsafe_allow_html=True)
 
-    tab_names = ["Açıklama", "Konum", "Fotoğraflar", "İlan teklifleri", "İndir"] + (["Düzenle", "Sil"] if manage else [])
+    tab_names = ["Açıklama", "Konum", "Fotoğraflar", "İlan teklifleri", "Mesaj", "İndir ve paylaş"] + (["Düzenle", "Sil"] if manage else [])
     detail_tabs = dict(zip(tab_names, st.tabs(tab_names)))
     with detail_tabs["Açıklama"]:
         st.write(property_row.get("description") or property_row.get("notes") or "Bu ilan için açıklama girilmemiş.")
+        with st.expander("📈 Fiyat geçmişi"):
+            price_history_table(client, property_id)
     with detail_tabs["Konum"]:
         st.write(f"{property_row.get('city', '')} / {property_row.get('district', '')} — {property_row.get('address') or 'Açık adres belirtilmemiş.'}")
         latitude, longitude = property_row.get("latitude"), property_row.get("longitude")
@@ -406,11 +522,18 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
         elif has_coordinates:
             map_url = f"https://www.google.com/maps/search/?api=1&query={latitude}%2C{longitude}"
             st.link_button("Google Haritalar'da aç", map_url, use_container_width=True)
+        distance_tool(property_row)
     with detail_tabs["Fotoğraflar"]:
         photos_tab_content(client, property_id, photos, manage)
     with detail_tabs["İlan teklifleri"]:
         offers_panel(client, property_id, user_id, is_admin, staff, str(property_row.get("owner_id")), "detail")
-    with detail_tabs["İndir"]:
+    with detail_tabs["Mesaj"]:
+        owner_id = str(property_row.get("owner_id"))
+        if owner_id == user_id:
+            st.info("Bu ilanın sorumlusu sizsiniz. İlanla ilgili mesajlar Mesajlar sekmesine gelir.")
+        else:
+            compose_message_form(client, user_id, staff, f"detail_{property_id}", default_recipient=owner_id, lock_recipient=True, property_id=property_id, subject_hint=f"İlan: {_clean(property_row.get('title'))}")
+    with detail_tabs["İndir ve paylaş"]:
         download_tab_content(property_row, photos)
     if manage:
         with detail_tabs["Düzenle"]:
@@ -887,7 +1010,7 @@ def property_fact_rows(row: pd.Series) -> list[tuple[str, str]]:
     return [(label, value) for label, value in facts if value]
 
 
-def build_excel(facts: list[tuple[str, str]], images: list | None = None) -> bytes:
+def build_excel(facts: list[tuple[str, str]], images: list | None = None, office_name: str = DEFAULT_OFFICE_NAME) -> bytes:
     from openpyxl import Workbook
     from openpyxl.drawing.image import Image as XLImage
     from openpyxl.styles import Alignment, Font, PatternFill
@@ -919,7 +1042,7 @@ def build_excel(facts: list[tuple[str, str]], images: list | None = None) -> byt
 
     row = 1
     sheet.row_dimensions[row].height = 32
-    block(1, 8, row, "  Ofis Portföyü", size=16, bold=True, color="FFFFFF", fill=navy)
+    block(1, 8, row, "  " + office_name, size=16, bold=True, color="FFFFFF", fill=navy)
     block(9, 12, row, f"İlan No: {data.get('İlan no', '')}  ", size=11, color="DBEAFE", fill=navy, horizontal="right")
     row += 1
     sheet.row_dimensions[row].height = 8
@@ -1063,7 +1186,7 @@ def _fetch_images(photos: list[dict], limit: int = 4) -> list:
     return images
 
 
-def render_listing_image(facts: list[tuple[str, str]], images: list):
+def render_listing_image(facts: list[tuple[str, str]], images: list, office_name: str = DEFAULT_OFFICE_NAME):
     from PIL import Image, ImageDraw, ImageOps
 
     data = dict(facts)
@@ -1073,7 +1196,7 @@ def render_listing_image(facts: list[tuple[str, str]], images: list):
     inner = width - 2 * margin
 
     draw.rectangle([0, 0, width, 110], fill="#1e3a8a")
-    draw.text((margin, 34), "Ofis Portföyü", font=_font(40, True), fill="white")
+    draw.text((margin, 34), office_name, font=_font(40, True), fill="white")
     id_text = f"İlan No: {data.get('İlan no', '')}"
     id_font = _font(30)
     draw.text((width - margin - draw.textlength(id_text, font=id_font), 44), id_text, font=id_font, fill="#dbeafe")
@@ -1160,11 +1283,11 @@ def render_listing_image(facts: list[tuple[str, str]], images: list):
     return page
 
 
-def _make_export(kind: str, facts: list[tuple[str, str]], photo_urls: list[str]) -> bytes:
+def _make_export(kind: str, facts: list[tuple[str, str]], photo_urls: list[str], office_name: str = DEFAULT_OFFICE_NAME) -> bytes:
     images = _fetch_images([{"url": url} for url in photo_urls])
     if kind == "xlsx":
-        return build_excel(facts, images)
-    page = render_listing_image(facts, images)
+        return build_excel(facts, images, office_name)
+    page = render_listing_image(facts, images, office_name)
     buffer = io.BytesIO()
     if kind == "png":
         page.save(buffer, "PNG")
@@ -1174,8 +1297,8 @@ def _make_export(kind: str, facts: list[tuple[str, str]], photo_urls: list[str])
 
 
 @st.cache_data(ttl=900, show_spinner="Dosya hazırlanıyor…", max_entries=30)
-def _make_export_cached(kind: str, facts_key: tuple, photo_names: tuple, _photo_urls: tuple) -> bytes:
-    return _make_export(kind, list(facts_key), list(_photo_urls))
+def _make_export_cached(kind: str, facts_key: tuple, photo_names: tuple, office_name: str, _photo_urls: tuple) -> bytes:
+    return _make_export(kind, list(facts_key), list(_photo_urls), office_name)
 
 
 def download_tab_content(row: pd.Series, photos: list[dict]) -> None:
@@ -1183,6 +1306,7 @@ def download_tab_content(row: pd.Series, photos: list[dict]) -> None:
     facts = property_fact_rows(row)
     urls = tuple(p["url"] for p in photos[:4])
     names = tuple(p["name"] for p in photos[:4])
+    office_name = st.session_state.get("office_name", DEFAULT_OFFICE_NAME)
     specs = [
         ("xlsx", "📊 Excel indir", "xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         ("pdf", "📄 PDF indir", "pdf", "application/pdf"),
@@ -1191,15 +1315,17 @@ def download_tab_content(row: pd.Series, photos: list[dict]) -> None:
     for column, (kind, label, extension, mime) in zip(st.columns(3), specs):
         file_name = f"ilan_{property_id[:8]}.{extension}"
         if DOWNLOAD_CALLABLE:
-            column.download_button(label, data=partial(_make_export, kind, facts, list(urls)), file_name=file_name, mime=mime, key=f"dl_{kind}_{property_id}", use_container_width=True, on_click="ignore")
+            column.download_button(label, data=partial(_make_export, kind, facts, list(urls), office_name), file_name=file_name, mime=mime, key=f"dl_{kind}_{property_id}", use_container_width=True, on_click="ignore")
         else:
             try:
-                data = _make_export_cached(kind, tuple(facts), names, urls)
+                data = _make_export_cached(kind, tuple(facts), names, office_name, urls)
             except Exception as exc:
                 column.error(f"{label}: hazırlanamadı ({exc})")
                 continue
             column.download_button(label, data, file_name=file_name, mime=mime, key=f"dl_{kind}_{property_id}", use_container_width=True)
     st.caption("Dosya, butona dokunduğunuzda hazırlanır ve iner; fotoğraf sayısına göre birkaç saniye sürebilir.")
+    st.divider()
+    whatsapp_block(row, facts, photos, office_name)
 
 
 def add_request(client: Client, user_id: str, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]]) -> None:
@@ -1249,6 +1375,64 @@ BACKUP_ALLOWED_COLUMNS = {
 }
 
 
+def build_backup_zip(admin_client: Client, include_photos: bool, progress=None) -> bytes:
+    all_properties = rows(admin_client, "properties")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("ilanlar.json", json.dumps({"format": BACKUP_FORMAT, "photos_included": include_photos, "properties": all_properties}, ensure_ascii=False, default=str, indent=2), compress_type=zipfile.ZIP_DEFLATED)
+        if include_photos:
+            bucket = admin_client.storage.from_(PHOTO_BUCKET)
+            for index, item in enumerate(all_properties, start=1):
+                property_id = str(item["id"])
+                for obj in bucket.list(property_id, {"limit": 1000}) or []:
+                    if not obj.get("id"):
+                        continue
+                    try:
+                        archive.writestr(f"fotograflar/{property_id}/{obj['name']}", bucket.download(f"{property_id}/{obj['name']}"), compress_type=zipfile.ZIP_STORED)
+                    except Exception:
+                        continue
+                if progress:
+                    progress(index, len(all_properties))
+    return buffer.getvalue()
+
+
+def restore_backup(admin_client: Client, uploaded, progress=None) -> tuple[int, int, list[str]]:
+    content = uploaded.getvalue()
+    archive = None
+    photos_by_old: dict[str, list[str]] = {}
+    if uploaded.name.lower().endswith(".zip"):
+        archive = zipfile.ZipFile(io.BytesIO(content))
+        data = json.loads(archive.read("ilanlar.json").decode("utf-8"))
+        for entry in archive.namelist():
+            parts = entry.split("/")
+            if len(parts) == 3 and parts[0] == "fotograflar" and parts[2]:
+                photos_by_old.setdefault(parts[1], []).append(entry)
+    else:
+        data = json.loads(content.decode("utf-8"))
+    backup_rows = data.get("properties", []) if isinstance(data, dict) else []
+    bucket = admin_client.storage.from_(PHOTO_BUCKET)
+    mime_types = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+    restored, photo_count, errors = 0, 0, []
+    for number, row in enumerate(backup_rows, start=1):
+        try:
+            result = admin_client.table("properties").insert({k: v for k, v in row.items() if k in BACKUP_ALLOWED_COLUMNS}).execute()
+            new_id = str(result.data[0]["id"])
+            restored += 1
+        except Exception as exc:
+            errors.append(f"{number}. ilan ({row.get('title') or 'başlıksız'}): {exc}")
+            continue
+        for entry in photos_by_old.get(str(row.get("id")), []):
+            extension = Path(entry).suffix.lower()
+            try:
+                bucket.upload(f"{new_id}/{uuid4().hex}{extension}", archive.read(entry), file_options={"content-type": mime_types.get(extension, "application/octet-stream"), "upsert": "false"})
+                photo_count += 1
+            except Exception as exc:
+                errors.append(f"{number}. ilanın fotoğrafı yüklenemedi: {exc}")
+        if progress:
+            progress(number, len(backup_rows))
+    return restored, photo_count, errors
+
+
 def property_backup_tools(admin_client: Client) -> None:
     notice = st.session_state.pop("restore_notice", None)
     if notice:
@@ -1257,47 +1441,33 @@ def property_backup_tools(admin_client: Client) -> None:
             st.error(error)
 
     st.markdown("#### İlanları yedekle")
-    try:
-        all_properties = rows(admin_client, "properties")
-    except Exception as exc:
-        st.error("İlanlar okunamadı.")
-        st.caption(str(exc))
-        all_properties = []
-    if all_properties:
-        payload = {"format": BACKUP_FORMAT, "properties": all_properties}
-        st.download_button(
-            f"İlanları yedekle (JSON) — {len(all_properties)} ilan",
-            json.dumps(payload, ensure_ascii=False, default=str, indent=2),
-            f"ilan_yedegi_{date.today().isoformat()}.json",
-            "application/json",
-            key="download_property_backup",
-        )
-        st.caption("Yedek, tüm ilanların kayıt bilgilerini içerir. Fotoğraflar yedeğe dahil değildir.")
-    else:
-        st.info("Yedeklenecek ilan yok.")
+    include_photos = st.checkbox("Fotoğrafları da yedeğe ekle", value=True, key="backup_include_photos")
+    st.caption("Yedek tek bir ZIP dosyasıdır: ilan bilgileri ve (seçiliyse) tüm fotoğraflar. Çok fotoğraf varsa hazırlanması birkaç dakika sürebilir.")
+    if st.button("Yedeği hazırla", key="prepare_backup"):
+        bar = st.progress(0.0, text="Yedek hazırlanıyor…")
+        try:
+            data = build_backup_zip(admin_client, include_photos, lambda done, total: bar.progress(done / max(total, 1), text=f"{done}/{total} ilan"))
+            st.session_state["backup_zip"] = (data, f"ilan_yedegi_{date.today().isoformat()}.zip")
+        except Exception as exc:
+            st.error("Yedek hazırlanamadı.")
+            st.caption(str(exc))
+        bar.empty()
+    prepared = st.session_state.get("backup_zip")
+    if prepared:
+        st.download_button(f"⬇️ Yedeği indir ({len(prepared[0]) / 1_048_576:.1f} MB)", prepared[0], prepared[1], "application/zip", key="download_backup_zip", type="primary")
 
     st.divider()
     st.markdown("#### Yedek dosyasından ilanları geri yükle")
-    st.warning("Geri yükleme, dosyadaki ilanları yeni kayıt olarak ekler; mevcut ilanları silmez veya güncellemez. Aynı yedeği iki kez yüklerseniz ilanlar çift olur.")
-    backup_file = st.file_uploader("Yedek dosyası (JSON)", type=["json"], key="property_backup_upload")
-    if backup_file and st.button("İlan yedeğini yükle", type="primary", key="restore_property_backup"):
+    st.warning("Geri yükleme, dosyadaki ilanları ve fotoğraflarını yeni kayıt olarak ekler; mevcut ilanları silmez veya güncellemez. Aynı yedeği iki kez yüklerseniz ilanlar çift olur.")
+    backup_file = st.file_uploader("Yedek dosyası (ZIP veya eski JSON)", type=["zip", "json"], key="property_backup_upload")
+    if backup_file and st.button("Yedeği geri yükle", type="primary", key="restore_property_backup"):
+        bar = st.progress(0.0, text="Geri yükleniyor…")
         try:
-            data = json.load(backup_file)
+            restored, photo_count, errors = restore_backup(admin_client, backup_file, lambda done, total: bar.progress(done / max(total, 1), text=f"{done}/{total} ilan"))
         except Exception as exc:
             st.error(f"Yedek dosyası okunamadı: {exc}")
             return
-        backup_rows = data.get("properties", []) if isinstance(data, dict) else []
-        if not backup_rows:
-            st.error("Dosyada geri yüklenecek ilan bulunamadı.")
-            return
-        restored, errors = 0, []
-        for number, row in enumerate(backup_rows, start=1):
-            try:
-                admin_client.table("properties").insert({k: v for k, v in row.items() if k in BACKUP_ALLOWED_COLUMNS}).execute()
-                restored += 1
-            except Exception as exc:
-                errors.append(f"{number}. ilan ({row.get('title') or 'başlıksız'}): {exc}")
-        st.session_state.restore_notice = {"message": f"{restored} / {len(backup_rows)} ilan geri yüklendi.", "errors": errors}
+        st.session_state.restore_notice = {"message": f"{restored} ilan ve {photo_count} fotoğraf geri yüklendi.", "errors": errors}
         st.rerun()
 
 
@@ -1407,11 +1577,15 @@ def admin_panel(client: Client, admin_client: Client, staff: pd.DataFrame, user_
     roster["Rol"] = roster["is_admin"].map(lambda admin: "Yönetici" if admin else "Çalışan")
     st.dataframe(roster[["name", "E-posta", "Rol", "Durum"]].rename(columns={"name": "Ad Soyad"}), hide_index=True, use_container_width=True)
 
-    create_tab, edit_tab, backup_tab, delete_tab = st.tabs(["Kullanıcı ekle", "Düzenle / devre dışı bırak", "İlan yedeği", "İlan sil"])
+    create_tab, edit_tab, backup_tab, delete_tab, titles_tab, news_tab = st.tabs(["Kullanıcı ekle", "Düzenle / devre dışı bırak", "İlan yedeği", "İlan sil", "Başlıklar", "Duyurular"])
     with backup_tab:
         property_backup_tools(admin_client)
     with delete_tab:
         property_delete_tools(admin_client, staff)
+    with titles_tab:
+        settings_admin_tab(client, admin_client)
+    with news_tab:
+        announcements_admin_tab(admin_client)
     with create_tab:
         with st.form("create_employee", clear_on_submit=True):
             name = st.text_input("Ad soyad")
@@ -1558,7 +1732,7 @@ def open_property(property_id: str) -> None:
     st.session_state["goto_nonce"] = st.session_state.get("goto_nonce", 0) + 1
 
 
-def render_property_rows(client: Client, items: list[dict], scope: str, notes: dict[str, str] | None = None, height: int = 470) -> None:
+def render_property_rows(client: Client, items: list[dict], scope: str, notes: dict[str, str] | None = None, height: int = 470, favorites: set[str] | None = None, row_action=None) -> None:
     ensure_thumbs(client, [str(item["id"]) for item in items])
     store = thumb_store()
     with st.container(height=height, border=False):
@@ -1572,6 +1746,8 @@ def render_property_rows(client: Client, items: list[dict], scope: str, notes: d
                 f"{_clean(item.get('city'))} / {_clean(item.get('district'))}", _clean(item.get("rooms")),
                 f"{area} m²", money_text(item.get("price")) + " ₺", _clean(item.get("status")), _clean(item.get("sorumlu")),
             ] if part)
+            if favorites and property_id in favorites:
+                line = "⭐ " + line
             thumb = (store.get(property_id) or (0, None))[1]
             with st.container(key=f"listing_row_{scope}_{property_id}"):
                 image_col, button_col = st.columns([1, 9], vertical_alignment="center")
@@ -1581,6 +1757,8 @@ def render_property_rows(client: Client, items: list[dict], scope: str, notes: d
                     st.button(line, key=f"open_{scope}_{property_id}", use_container_width=True, on_click=open_property, args=(property_id,))
                     if notes and property_id in notes:
                         st.caption(notes[property_id])
+                    if row_action:
+                        row_action(item, property_id)
 
 
 # ---------- müşteri talebi eşleştirme ----------
@@ -1654,25 +1832,34 @@ def select_request(request_id: str) -> None:
     st.session_state["selected_request_id"] = str(request_id)
 
 
-def requests_tab(client: Client, requests_df: pd.DataFrame, properties: pd.DataFrame) -> None:
+def requests_tab(client: Client, requests_df: pd.DataFrame, properties: pd.DataFrame, staff: pd.DataFrame, location_data: tuple[list[str], dict[str, list[str]]], user_id: str, is_admin: bool, favorites: set[str]) -> None:
     if requests_df.empty:
         st.info("Henüz müşteri talebi yok.")
         return
     items = requests_df.to_dict("records")
+    if st.toggle("Tablo görünümü", key="requests_table_view"):
+        table = pd.DataFrame([{
+            "Müşteri": _clean(i.get("customer_name")), "Telefon": _clean(i.get("phone")), "İşlem": _clean(i.get("deal_type")),
+            "İl": _clean(i.get("city")), "İlçe": _clean(i.get("district")), "Oda": _clean(i.get("rooms")),
+            "En düşük bütçe (₺)": money_text(i.get("min_price")), "En yüksek bütçe (₺)": money_text(i.get("max_price")),
+            "Hedef tarih": _clean(i.get("target_date")), "Durum": _clean(i.get("status")), "Sorumlu": _clean(i.get("sorumlu")), "Notlar": _clean(i.get("notes")),
+        } for i in items])
+        st.dataframe(table, hide_index=True, use_container_width=True, height=460)
+        return
+    provinces, districts_by_province = location_data
     ids = [str(item["id"]) for item in items]
     selected_id = st.session_state.get("selected_request_id")
     if selected_id not in ids:
         selected_id = ids[0]
     request = items[ids.index(selected_id)]
+    can_manage = is_admin or str(request.get("owner_id")) == user_id or str(request.get("created_by")) == user_id
     left, right = st.columns([1, 2], gap="medium")
     with left:
         st.caption(f"{len(items)} talep · incelemek için dokunun")
         with st.container(height=520, border=False):
             for item in items:
                 request_id = str(item["id"])
-                budget = ""
-                if item.get("min_price") or item.get("max_price"):
-                    budget = f"₺{money_text(item.get('min_price'))}–{money_text(item.get('max_price'))}"
+                budget = f"₺{money_text(item.get('min_price'))}–{money_text(item.get('max_price'))}" if (item.get("min_price") or item.get("max_price")) else ""
                 line = " · ".join(part for part in [
                     f"👤 {_clean(item.get('customer_name'))}", _clean(item.get("deal_type")),
                     f"{_clean(item.get('city'))}/{_clean(item.get('district'))}", _clean(item.get("rooms")), budget, _clean(item.get("status")),
@@ -1692,6 +1879,64 @@ def requests_tab(client: Client, requests_df: pd.DataFrame, properties: pd.DataF
             if s2.button("Durumu kaydet", key=f"request_status_save_{selected_id}", use_container_width=True):
                 client.table("requests").update({"status": new_status}).eq("id", selected_id).execute()
                 st.rerun()
+        if can_manage:
+            edit_col, delete_col = st.columns(2)
+            with edit_col.expander("✏️ Talebi düzenle"):
+                prefix = f"reqedit_{selected_id}"
+                e1, e2, e3 = st.columns(3)
+                customer = e1.text_input("Müşteri adı *", value=_clean(request.get("customer_name")), key=f"{prefix}_customer")
+                phone = e2.text_input("Telefon", value=_clean(request.get("phone")), key=f"{prefix}_phone")
+                deal_options = ["Kiralık", "Satılık"]
+                deal = e3.selectbox("İşlem", deal_options, index=deal_options.index(_clean(request.get("deal_type"))) if _clean(request.get("deal_type")) in deal_options else 0, key=f"{prefix}_deal")
+                e4, e5, e6 = st.columns(3)
+                city_options = ["Farketmez"] + provinces
+                current_city = _clean(request.get("city")) or "Farketmez"
+                if provinces:
+                    city = e4.selectbox("İstenen il", city_options, index=city_options.index(current_city) if current_city in city_options else 0, key=f"{prefix}_city")
+                    district_options = ["Farketmez"] + (districts_by_province.get(city, []) if city != "Farketmez" else [])
+                    current_district = _clean(request.get("district")) or "Farketmez"
+                    district = e5.selectbox("İstenen ilçe", district_options, index=district_options.index(current_district) if current_district in district_options else 0, key=f"{prefix}_district_{city}")
+                else:
+                    city = e4.text_input("İstenen il", value=current_city, key=f"{prefix}_city")
+                    district = e5.text_input("İstenen ilçe", value=_clean(request.get("district")), key=f"{prefix}_district")
+                room_options = ["Farketmez", "1+0", "1+1", "2+1", "3+1", "4+1", "Diğer"]
+                rooms = e6.selectbox("Oda tercihi", room_options, index=room_options.index(_clean(request.get("rooms"))) if _clean(request.get("rooms")) in room_options else 0, key=f"{prefix}_rooms")
+                e7, e8, e9 = st.columns(3)
+                min_price = e7.number_input("En düşük bütçe (₺)", min_value=0, step=1000, value=int(float(request.get("min_price") or 0)), key=f"{prefix}_min")
+                max_price = e8.number_input("En yüksek bütçe (₺)", min_value=0, step=1000, value=int(float(request.get("max_price") or 0)), key=f"{prefix}_max")
+                existing_date = pd.to_datetime(request.get("target_date"), errors="coerce")
+                deadline = e9.date_input("Hedef tarih", value=existing_date.date() if pd.notna(existing_date) else None, key=f"{prefix}_date")
+                owner_ids = staff["id"].astype(str).tolist()
+                current_owner = str(request.get("owner_id"))
+                owner = st.selectbox("Sorumlu çalışan", owner_ids, index=owner_ids.index(current_owner) if current_owner in owner_ids else 0, format_func=lambda x: staff.loc[staff.id.astype(str) == x, "name"].iloc[0], key=f"{prefix}_owner")
+                notes = st.text_area("Müşteri notları", value=_clean(request.get("notes")), key=f"{prefix}_notes")
+                if st.button("Değişiklikleri kaydet", type="primary", key=f"{prefix}_save", use_container_width=True):
+                    if not customer.strip():
+                        st.error("Müşteri adı boş olamaz.")
+                    elif max_price and min_price > max_price:
+                        st.error("En düşük bütçe en yüksek bütçeden fazla olamaz.")
+                    else:
+                        result = service_client(client).table("requests").update({
+                            "customer_name": customer.strip(), "phone": phone.strip(), "deal_type": deal, "city": city, "district": district,
+                            "rooms": rooms, "min_price": int(min_price), "max_price": int(max_price),
+                            "target_date": deadline.isoformat() if isinstance(deadline, date) else None, "notes": notes.strip(), "owner_id": owner,
+                        }).eq("id", selected_id).execute()
+                        if result.data:
+                            st.success("Talep güncellendi.")
+                            st.rerun()
+                        else:
+                            st.error("Talep güncellenemedi.")
+            with delete_col.expander("🗑️ Talebi sil"):
+                st.warning("Talep kalıcı olarak silinir.")
+                confirm = st.checkbox("Bu talebi silmek istediğimi onaylıyorum.", key=f"reqdel_confirm_{selected_id}")
+                if st.button("Talebi sil", type="primary", disabled=not confirm, key=f"reqdel_{selected_id}", use_container_width=True):
+                    result = service_client(client).table("requests").delete().eq("id", selected_id).execute()
+                    if result.data:
+                        st.session_state.pop("selected_request_id", None)
+                        st.session_state["property_delete_notice"] = "Talep silindi."
+                        st.rerun()
+                    else:
+                        st.error("Talep silinemedi.")
         m1, m2 = st.columns([2, 1], vertical_alignment="center")
         m1.markdown("**Bu talebe uygun ilanlar** (en uygun olan üstte)")
         min_score = m2.select_slider("En az uyum", options=[0, 30, 50, 70, 90], value=50, key="match_min_score", format_func=lambda v: f"%{v}")
@@ -1699,7 +1944,7 @@ def requests_tab(client: Client, requests_df: pd.DataFrame, properties: pd.DataF
         if not matches:
             st.info("Bu talebe uygun aktif ilan bulunamadı. Uyum eşiğini düşürmeyi deneyin.")
         else:
-            render_property_rows(client, [m[0] for m in matches], "match", notes={str(m[0]["id"]): f"%{m[1]} uyum · {m[2]}" for m in matches}, height=300)
+            render_property_rows(client, [m[0] for m in matches], "match", notes={str(m[0]["id"]): f"%{m[1]} uyum · {m[2]}" for m in matches}, height=260, favorites=favorites)
 
 
 # ---------- teklifler ----------
@@ -1836,13 +2081,461 @@ def offers_tab(client: Client, properties: pd.DataFrame, staff: pd.DataFrame, us
 
 
 # ---------- çalışan özeti ----------
+# ---------- favoriler ----------
+def load_favorites(client: Client, user_id: str) -> tuple[set[str], bool]:
+    try:
+        data = client.table("favorites").select("property_id").eq("user_id", user_id).execute().data or []
+        return {str(item["property_id"]) for item in data}, True
+    except Exception:
+        return set(), False
+
+
+def set_favorite(client: Client, user_id: str, property_id: str, add: bool) -> None:
+    try:
+        if add:
+            client.table("favorites").upsert({"user_id": user_id, "property_id": property_id}).execute()
+        else:
+            client.table("favorites").delete().eq("user_id", user_id).eq("property_id", property_id).execute()
+    except Exception as exc:
+        st.session_state["feature_error"] = ("Favoriler", str(exc))
+
+
+def favorites_view(client: Client, user_id: str, properties: pd.DataFrame, favorites: set[str]) -> None:
+    items = properties[properties.id.astype(str).isin(favorites)].to_dict("records") if not properties.empty else []
+    st.caption(f"{len(items)} favori ilan · ilana dokunarak açabilir, ★ ile favorilerden kaldırabilirsiniz.")
+
+    def remove_action(item: dict, property_id: str) -> None:
+        st.button("★ Favorilerden kaldır", key=f"unfav_{property_id}", on_click=set_favorite, args=(client, user_id, property_id, False))
+
+    if not items:
+        st.info("Henüz favori ilanınız yok. İlan detayında “Favorilere ekle” butonunu kullanın.")
+        return
+    render_property_rows(client, items, "fav", favorites=favorites, row_action=remove_action, height=440)
+
+
+# ---------- fiyat geçmişi ----------
+def load_price_history(client: Client, property_id: str | None = None, limit: int = 500) -> list[dict]:
+    query = client.table("price_history").select("*").order("changed_at", desc=True).limit(limit)
+    if property_id:
+        query = query.eq("property_id", property_id)
+    return query.execute().data or []
+
+
+def _change_text(entry: dict) -> tuple[str, float]:
+    old, new = float(entry.get("old_price") or 0), float(entry.get("new_price") or 0)
+    pct = (new - old) / old * 100 if old else 0.0
+    arrow = "📉" if new < old else "📈"
+    stamp = pd.to_datetime(entry.get("changed_at"), utc=True, errors="coerce")
+    when = stamp.tz_convert(TZ).strftime("%d.%m.%Y %H:%M") if pd.notna(stamp) else ""
+    return f"{arrow} {money_text(old)} → {money_text(new)} ₺ ({pct:+.1f}%) · {when}", pct
+
+
+def price_history_table(client: Client, property_id: str) -> None:
+    try:
+        history = load_price_history(client, property_id)
+    except Exception as exc:
+        feature_setup_message("Fiyat geçmişi", exc)
+        return
+    if not history:
+        st.caption("Bu ilanda henüz fiyat değişikliği kaydı yok.")
+        return
+    names = st.session_state.get("staff_names", {})
+    frame = pd.DataFrame([{
+        "Tarih": (pd.to_datetime(h.get("changed_at"), utc=True).tz_convert(TZ).strftime("%d.%m.%Y %H:%M")),
+        "Eski fiyat (₺)": money_text(h.get("old_price")), "Yeni fiyat (₺)": money_text(h.get("new_price")),
+        "Değişim": _change_text(h)[0].split("(")[1].split(")")[0], "Değiştiren": names.get(str(h.get("changed_by")), "—"),
+    } for h in history])
+    st.dataframe(frame, hide_index=True, use_container_width=True)
+
+
+def price_changes_view(client: Client, properties: pd.DataFrame) -> None:
+    mode = st.radio("Fiyat değişimi", ["Tümü", "📉 Fiyatı düşenler", "📈 Fiyatı artanlar"], horizontal=True, key="price_change_filter", label_visibility="collapsed")
+    try:
+        history = load_price_history(client)
+    except Exception as exc:
+        feature_setup_message("Fiyat geçmişi", exc)
+        return
+    latest: dict[str, dict] = {}
+    for entry in history:
+        latest.setdefault(str(entry["property_id"]), entry)
+    items, notes = [], {}
+    for item in properties.to_dict("records") if not properties.empty else []:
+        entry = latest.get(str(item["id"]))
+        if not entry:
+            continue
+        text, pct = _change_text(entry)
+        if mode.startswith("📉") and pct >= 0:
+            continue
+        if mode.startswith("📈") and pct <= 0:
+            continue
+        items.append((str(entry.get("changed_at")), item))
+        notes[str(item["id"])] = text
+    items.sort(key=lambda pair: pair[0], reverse=True)
+    st.caption(f"{len(items)} ilanda fiyat değişikliği kaydı var.")
+    if not items:
+        st.info("Gösterilecek fiyat değişikliği yok. Fiyat değişiklikleri ilan düzenlendiğinde otomatik kaydedilir.")
+        return
+    render_property_rows(client, [pair[1] for pair in items], "price", notes=notes, height=420)
+
+
+# ---------- mesajlar ----------
+def load_messages(client: Client, user_id: str) -> list[dict]:
+    return client.table("messages").select("*").or_(f"sender_id.eq.{user_id},recipient_id.eq.{user_id}").order("created_at", desc=True).limit(300).execute().data or []
+
+
+def send_message(client: Client, sender_id: str, recipient_id: str, subject: str, body: str, property_id: str | None = None, parent_id: str | None = None) -> None:
+    payload = {"sender_id": sender_id, "recipient_id": recipient_id, "subject": subject.strip(), "body": body.strip()}
+    if property_id:
+        payload["property_id"] = property_id
+    if parent_id:
+        payload["parent_id"] = parent_id
+    client.table("messages").insert(payload).execute()
+
+
+def compose_message_form(client: Client, user_id: str, staff: pd.DataFrame, scope: str, default_recipient: str | None = None, property_id: str | None = None, subject_hint: str = "", lock_recipient: bool = False) -> None:
+    generation = st.session_state.get("msg_generation", 0)
+    others = staff[staff.id.astype(str) != user_id]
+    ids = others.id.astype(str).tolist()
+    names = dict(zip(others.id.astype(str), others.name))
+    if not ids:
+        st.info("Mesaj gönderilebilecek başka çalışan yok.")
+        return
+    if lock_recipient and default_recipient in names:
+        recipient = default_recipient
+        st.caption(f"Alıcı: **{names[recipient]}**")
+    else:
+        recipient = st.selectbox("Alıcı", ids, index=ids.index(default_recipient) if default_recipient in ids else 0, format_func=names.get, key=f"msg_to_{scope}_{generation}")
+    subject = st.text_input("Konu", value=subject_hint, key=f"msg_subject_{scope}_{generation}")
+    body = st.text_area("Mesaj", height=100, key=f"msg_body_{scope}_{generation}")
+    if st.button("Mesajı gönder", type="primary", key=f"msg_send_{scope}_{generation}"):
+        if not body.strip():
+            st.error("Mesaj metnini yazın.")
+            return
+        try:
+            send_message(client, user_id, recipient, subject, body, property_id)
+        except Exception as exc:
+            feature_setup_message("Mesajlar", exc)
+            return
+        st.session_state["msg_generation"] = generation + 1
+        st.session_state["message_notice"] = f"Mesaj {names.get(recipient, '')} kişisine gönderildi."
+        st.rerun()
+
+
+def messages_tab(client: Client, staff: pd.DataFrame, user_id: str, messages: list[dict], available: bool, properties: pd.DataFrame) -> None:
+    if not available:
+        feature_setup_message("Mesajlar")
+        return
+    names = dict(zip(staff.id.astype(str), staff.name))
+    titles = {str(r["id"]): _clean(r.get("title")) for r in properties.to_dict("records")} if not properties.empty else {}
+    inbox = [m for m in messages if str(m["recipient_id"]) == user_id and not m.get("deleted_by_recipient")]
+    sent = [m for m in messages if str(m["sender_id"]) == user_id and not m.get("deleted_by_sender")]
+    generation = st.session_state.get("msg_generation", 0)
+
+    def bump() -> None:
+        st.session_state["msg_generation"] = generation + 1
+
+    def when(message: dict) -> str:
+        stamp = pd.to_datetime(message.get("created_at"), utc=True, errors="coerce")
+        return stamp.tz_convert(TZ).strftime("%d.%m.%Y %H:%M") if pd.notna(stamp) else ""
+
+    def update(message_id: str, values: dict) -> None:
+        client.table("messages").update(values).eq("id", message_id).execute()
+
+    inbox_tab, sent_tab, new_tab = st.tabs(["Gelen kutusu", "Gönderilenler", "Yeni mesaj"])
+    with inbox_tab:
+        unread = [m for m in inbox if not m.get("is_read")]
+        top1, top2 = st.columns([3, 1], vertical_alignment="center")
+        top1.caption(f"{len(inbox)} mesaj · {len(unread)} okunmamış")
+        if unread and top2.button("Tümünü okundu say", key=f"msg_read_all_{generation}", use_container_width=True):
+            for message in unread:
+                update(str(message["id"]), {"is_read": True})
+            bump()
+            st.rerun()
+        if not inbox:
+            st.info("Gelen kutunuz boş.")
+        with st.container(height=430, border=False):
+            for message in inbox:
+                message_id = str(message["id"])
+                sender = names.get(str(message["sender_id"]), "Bilinmiyor")
+                mark = "🔵 " if not message.get("is_read") else ""
+                with st.expander(f"{mark}{sender} · {message.get('subject') or '(konusuz)'} · {when(message)}"):
+                    property_id = str(message.get("property_id") or "")
+                    if property_id and property_id in titles:
+                        st.button(f"🏠 İlanı aç: {titles[property_id]}", key=f"msg_open_{message_id}_{generation}", on_click=open_property, args=(property_id,))
+                    st.write(message["body"])
+                    reply = st.text_area("Yanıtınız", height=80, key=f"msg_reply_{message_id}_{generation}")
+                    b1, b2, b3 = st.columns(3)
+                    if b1.button("Yanıtla", type="primary", key=f"msg_reply_send_{message_id}_{generation}", use_container_width=True):
+                        if not reply.strip():
+                            st.error("Yanıt metnini yazın.")
+                        else:
+                            subject = message.get("subject") or ""
+                            send_message(client, user_id, str(message["sender_id"]), subject if subject.startswith("Re:") else f"Re: {subject}".strip(), reply, property_id or None, message_id)
+                            update(message_id, {"is_read": True})
+                            bump()
+                            st.session_state["message_notice"] = "Yanıt gönderildi."
+                            st.rerun()
+                    if not message.get("is_read") and b2.button("Okundu say", key=f"msg_read_{message_id}_{generation}", use_container_width=True):
+                        update(message_id, {"is_read": True})
+                        bump()
+                        st.rerun()
+                    if b3.button("Sil", key=f"msg_delete_in_{message_id}_{generation}", use_container_width=True):
+                        update(message_id, {"deleted_by_recipient": True})
+                        bump()
+                        st.rerun()
+    with sent_tab:
+        st.caption(f"{len(sent)} gönderilmiş mesaj")
+        if not sent:
+            st.info("Henüz mesaj göndermediniz.")
+        with st.container(height=430, border=False):
+            for message in sent:
+                message_id = str(message["id"])
+                with st.expander(f"→ {names.get(str(message['recipient_id']), 'Bilinmiyor')} · {message.get('subject') or '(konusuz)'} · {when(message)}"):
+                    st.write(message["body"])
+                    st.caption("Okundu" if message.get("is_read") else "Henüz okunmadı")
+                    if st.button("Sil", key=f"msg_delete_out_{message_id}_{generation}"):
+                        update(message_id, {"deleted_by_sender": True})
+                        bump()
+                        st.rerun()
+    with new_tab:
+        compose_message_form(client, user_id, staff, "main")
+
+
+# ---------- ajanda ----------
+def load_reminders(client: Client, user_id: str) -> list[dict]:
+    return client.table("reminders").select("*").eq("user_id", user_id).order("remind_at").execute().data or []
+
+
+def reminder_time(reminder: dict) -> datetime:
+    return pd.to_datetime(reminder["remind_at"], utc=True).tz_convert(TZ).to_pydatetime()
+
+
+def reminder_alerts(reminders: list[dict]) -> tuple[list[dict], list[dict]]:
+    now = now_tr()
+    due = [r for r in reminders if not r.get("done") and reminder_time(r) <= now]
+    today = [r for r in reminders if not r.get("done") and reminder_time(r) > now and reminder_time(r).date() == now.date()]
+    return due, today
+
+
+def agenda_tab(client: Client, user_id: str, properties: pd.DataFrame, reminders: list[dict], available: bool) -> None:
+    if not available:
+        feature_setup_message("Ajanda")
+        return
+    due, today = reminder_alerts(reminders)
+    if due:
+        st.error("⏰ **Zamanı gelen / geçen hatırlatmalar:** " + " · ".join(f"{r['title']} ({reminder_time(r):%d.%m %H:%M})" for r in due[:5]))
+    if today:
+        st.warning("📅 **Bugün yaklaşan hatırlatmalar:** " + " · ".join(f"{r['title']} ({reminder_time(r):%H:%M})" for r in today[:5]))
+    if not due and not today:
+        st.success("Bugün için bekleyen hatırlatmanız yok.")
+    generation = st.session_state.get("agenda_generation", 0)
+
+    def bump() -> None:
+        st.session_state["agenda_generation"] = generation + 1
+
+    labels = {str(r["id"]): f"{_clean(r.get('title'))} — {_clean(r.get('city'))}/{_clean(r.get('district'))}" for r in properties.to_dict("records")} if not properties.empty else {}
+    now = now_tr()
+    with st.expander("➕ Hatırlatma ekle", expanded=not reminders):
+        title = st.text_input("Hatırlatma başlığı *", key=f"rem_title_{generation}", placeholder="Örn. Zeynep Hanım'ı ara, anahtar teslimi…")
+        d1, d2, d3 = st.columns(3)
+        remind_date = d1.date_input("Tarih", value=now.date(), key=f"rem_date_{generation}")
+        remind_time = d2.time_input("Saat", value=(now + timedelta(hours=1)).time().replace(minute=0, second=0, microsecond=0), key=f"rem_time_{generation}")
+        linked = d3.selectbox("İlgili ilan (isteğe bağlı)", ["Yok"] + list(labels), format_func=lambda x: x if x == "Yok" else labels[x], key=f"rem_property_{generation}")
+        notes = st.text_area("Not", height=70, key=f"rem_notes_{generation}")
+        if st.button("Hatırlatmayı kaydet", type="primary", key=f"rem_save_{generation}"):
+            if not title.strip():
+                st.error("Hatırlatma başlığını yazın.")
+            else:
+                client.table("reminders").insert({"user_id": user_id, "title": title.strip(), "notes": notes.strip(), "remind_at": datetime.combine(remind_date, remind_time, tzinfo=TZ).isoformat(), "property_id": None if linked == "Yok" else linked}).execute()
+                bump()
+                st.rerun()
+    show = st.radio("Göster", ["Bekleyenler", "Tamamlananlar", "Tümü"], horizontal=True, key="agenda_filter", label_visibility="collapsed")
+    visible = [r for r in reminders if (show == "Tümü") or (show == "Tamamlananlar" and r.get("done")) or (show == "Bekleyenler" and not r.get("done"))]
+    st.caption(f"{len(visible)} hatırlatma")
+    with st.container(height=380, border=False):
+        for reminder in visible:
+            reminder_id = str(reminder["id"])
+            when = reminder_time(reminder)
+            icon = "✅" if reminder.get("done") else ("🔴" if when <= now else ("🟡" if when.date() == now.date() else "⏰"))
+            with st.expander(f"{icon} {when:%d.%m.%Y %H:%M} — {reminder['title']}"):
+                property_id = str(reminder.get("property_id") or "")
+                if property_id in labels:
+                    st.button(f"🏠 İlanı aç: {labels[property_id]}", key=f"rem_open_{reminder_id}_{generation}", on_click=open_property, args=(property_id,))
+                new_title = st.text_input("Başlık", value=reminder["title"], key=f"rem_edit_title_{reminder_id}_{generation}")
+                e1, e2 = st.columns(2)
+                new_date = e1.date_input("Tarih", value=when.date(), key=f"rem_edit_date_{reminder_id}_{generation}")
+                new_time = e2.time_input("Saat", value=when.time().replace(second=0, microsecond=0), key=f"rem_edit_time_{reminder_id}_{generation}")
+                new_notes = st.text_area("Not", value=reminder.get("notes") or "", height=70, key=f"rem_edit_notes_{reminder_id}_{generation}")
+                b1, b2, b3 = st.columns(3)
+                if b1.button("Kaydet", type="primary", key=f"rem_update_{reminder_id}_{generation}", use_container_width=True):
+                    client.table("reminders").update({"title": new_title.strip() or reminder["title"], "notes": new_notes.strip(), "remind_at": datetime.combine(new_date, new_time, tzinfo=TZ).isoformat()}).eq("id", reminder_id).execute()
+                    bump()
+                    st.rerun()
+                if b2.button("Tekrar aç" if reminder.get("done") else "Tamamlandı", key=f"rem_done_{reminder_id}_{generation}", use_container_width=True):
+                    client.table("reminders").update({"done": not reminder.get("done")}).eq("id", reminder_id).execute()
+                    bump()
+                    st.rerun()
+                if b3.button("Sil", key=f"rem_delete_{reminder_id}_{generation}", use_container_width=True):
+                    client.table("reminders").delete().eq("id", reminder_id).execute()
+                    bump()
+                    st.rerun()
+
+
+def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = math.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lng2 - lng1) / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def road_route(lat1: float, lng1: float, lat2: float, lng2: float) -> dict | None:
+    try:
+        response = requests.get(f"https://router.project-osrm.org/route/v1/driving/{lng1},{lat1};{lng2},{lat2}", params={"overview": "false"}, headers=USER_AGENT, timeout=10)
+        route = response.json()["routes"][0]
+        return {"km": route["distance"] / 1000, "minutes": route["duration"] / 60}
+    except Exception:
+        return None
+
+
+def distance_tool(property_row: pd.Series) -> None:
+    property_id = str(property_row.id)
+    st.markdown("##### 📏 Mesafe ölç")
+    city, district = _clean(property_row.get("city")), _clean(property_row.get("district"))
+    latitude, longitude = pd.to_numeric(property_row.get("latitude"), errors="coerce"), pd.to_numeric(property_row.get("longitude"), errors="coerce")
+    origin = (float(latitude), float(longitude)) if pd.notna(latitude) and pd.notna(longitude) else None
+    q1, q2 = st.columns([4, 1], vertical_alignment="bottom")
+    query = q1.text_input("Mesafesini öğrenmek istediğiniz adres veya yer", key=f"dist_query_{property_id}", placeholder="Örn. Selçuklu Devlet Hastanesi, otogar, çalıştığınız iş yeri adresi…")
+    if q2.button("Mesafeyi ölç", key=f"dist_button_{property_id}", use_container_width=True):
+        if not query.strip():
+            st.warning("Bir adres veya yer adı yazın.")
+        else:
+            try:
+                start = origin
+                if start is None:
+                    place = search_location(", ".join(part for part in (_clean(property_row.get("address")), district, city, "Türkiye") if part))
+                    start = (float(place["lat"]), float(place["lon"])) if place else None
+                target = search_location(f"{query.strip()}, {city}, Türkiye") or search_location(f"{query.strip()}, Türkiye")
+            except Exception:
+                start, target = None, None
+                st.error("Adres arama servisine şu anda ulaşılamadı.")
+            if start is None:
+                st.warning("İlanın konumu bulunamadı. İlan düzenleme ekranından haritada konumu işaretleyin.")
+            elif not target:
+                st.warning("Girilen adres bulunamadı; daha ayrıntılı yazmayı deneyin.")
+            else:
+                end = (float(target["lat"]), float(target["lon"]))
+                route = road_route(round(start[0], 6), round(start[1], 6), round(end[0], 6), round(end[1], 6))
+                st.session_state[f"dist_{property_id}"] = {"start": start, "end": end, "straight": haversine_km(*start, *end), "route": route, "label": target.get("display_name", query)}
+    result = st.session_state.get(f"dist_{property_id}")
+    if not result:
+        return
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Kuş uçuşu", f"{result['straight']:.2f} km")
+    if result["route"]:
+        m2.metric("Araçla yol", f"{result['route']['km']:.1f} km")
+        m3.metric("Tahmini süre", f"{result['route']['minutes']:.0f} dk")
+    else:
+        m2.metric("Araçla yol", "—")
+        m3.caption("Yol bilgisi alınamadı; kuş uçuşu mesafe gösteriliyor.")
+    st.caption("Hedef: " + str(result["label"]).split(",")[0] + " — " + ", ".join(str(result["label"]).split(",")[1:3]).strip())
+    fmap = folium.Map(location=[(result["start"][0] + result["end"][0]) / 2, (result["start"][1] + result["end"][1]) / 2], zoom_start=13)
+    folium.Marker(result["start"], tooltip="İlan", icon=folium.Icon(color="red")).add_to(fmap)
+    folium.Marker(result["end"], tooltip="Hedef", icon=folium.Icon(color="blue")).add_to(fmap)
+    folium.PolyLine([result["start"], result["end"]], color="#1d4ed8", weight=3, dash_array="6").add_to(fmap)
+    fmap.fit_bounds([result["start"], result["end"]], padding=(30, 30))
+    st_folium(fmap, height=260, use_container_width=True, key=f"dist_map_{property_id}", returned_objects=[])
+
+
+WHATSAPP_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
+body{margin:0;font-family:system-ui,sans-serif}
+button{width:100%;padding:12px;border:0;border-radius:10px;background:#25D366;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+#msg{margin-top:6px;font-size:13px;color:#475467}
+</style></head><body><button id="share" type="button">📲 WhatsApp'ta paylaş</button><div id="msg"></div>
+<script>
+const b64 = "__B64__"; const text = __TEXT__; const fileName = __NAME__;
+function makeFile() {
+  const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new File([bytes], fileName, {type: "image/jpeg"});
+}
+document.getElementById("share").onclick = async () => {
+  const file = makeFile();
+  const navs = [navigator];
+  try { navs.push(window.parent.navigator); } catch (e) {}
+  for (const nav of navs) {
+    try {
+      if (nav.canShare && nav.canShare({files: [file]})) { await nav.share({files: [file], text: text}); return; }
+    } catch (e) { if (e && e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = "data:image/jpeg;base64," + b64; a.download = fileName;
+  document.body.appendChild(a); a.click(); a.remove();
+  window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
+  document.getElementById("msg").textContent = "Resim indirildi. WhatsApp'ta sohbeti seçip indirilen resmi ekleyin.";
+};
+</script></body></html>"""
+
+
+def whatsapp_text(facts: list[tuple[str, str]]) -> str:
+    data = dict(facts)
+    lines = [f"🏠 {data.get('Başlık', '')}", f"💰 {data.get('Fiyat', '')} · {data.get('İşlem', '')}", f"📍 {data.get('İl', '')} / {data.get('İlçe', '')}"]
+    detail = " · ".join(part for part in (data.get("Oda sayısı"), f"{data['Brüt m²']} m²" if data.get("Brüt m²") else "") if part)
+    if detail:
+        lines.append(f"📐 {detail}")
+    if data.get("Sorumlu"):
+        lines.append(f"👤 {data['Sorumlu']}")
+    if data.get("Harita bağlantısı"):
+        lines.append(f"🗺️ {data['Harita bağlantısı']}")
+    return "\n".join(lines)
+
+
+def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[dict], office_name: str) -> None:
+    property_id = str(row.id)
+    signature = f"{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
+    state_key = f"wa_{property_id}"
+    prepared = st.session_state.get(state_key)
+    if prepared and prepared.get("sig") != signature:
+        prepared = None
+    text = whatsapp_text(facts)
+    if not prepared:
+        if st.button("📲 WhatsApp paylaşımını hazırla", key=f"wa_prepare_{property_id}", use_container_width=True):
+            try:
+                with st.spinner("Paylaşım resmi hazırlanıyor…"):
+                    page = render_listing_image(facts, _fetch_images(photos), office_name)
+                    page = page.resize((1000, int(page.height * 1000 / page.width)))
+                    buffer = io.BytesIO()
+                    page.convert("RGB").save(buffer, "JPEG", quality=82)
+                st.session_state[state_key] = {"sig": signature, "b64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+                st.rerun()
+            except Exception as exc:
+                st.error("Paylaşım resmi hazırlanamadı.")
+                st.caption(str(exc))
+        st.caption("İlanın paylaşım resmi hazırlanır; ardından WhatsApp'ta kişi veya grup seçerek gönderirsiniz.")
+    else:
+        html = WHATSAPP_HTML.replace("__B64__", prepared["b64"]).replace("__TEXT__", json.dumps(text).replace("</", "<\\/")).replace("__NAME__", json.dumps(f"ilan_{property_id[:8]}.jpg"))
+        embed_html(html, 90)
+    st.link_button("Yalnızca metni WhatsApp'ta aç", "https://wa.me/?text=" + quote(text), use_container_width=True)
+
+
 def select_employee(employee_id: str) -> None:
     st.session_state["summary_employee"] = str(employee_id)
 
 
-def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.DataFrame, requests_df: pd.DataFrame, is_admin: bool) -> None:
+def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.DataFrame, requests_df: pd.DataFrame, is_admin: bool, user_id: str) -> None:
     selected = st.session_state.get("summary_employee")
-    st.caption("Bir çalışanın adına dokunun; ilanları aşağıda listelenir, ilana dokununca ilan açılır.")
+    me = staff[staff.id.astype(str) == user_id]
+    with st.expander("👤 Profilimi düzenle"):
+        mine = me.iloc[0] if not me.empty else pd.Series(dtype=object)
+        job = st.text_input("Ünvan / görev", value=_clean(mine.get("job_title")), key="profile_job", placeholder="Örn. Gayrimenkul danışmanı")
+        phone = st.text_input("Telefon", value=_clean(mine.get("phone")), key="profile_phone")
+        bio = st.text_area("Hakkımda", value=_clean(mine.get("bio")), height=100, key="profile_bio", placeholder="Uzmanlık alanlarınız, çalıştığınız bölgeler, kısa tanıtım…")
+        if st.button("Profili kaydet", type="primary", key="profile_save"):
+            try:
+                service_client(client).table("profiles").update({"job_title": job.strip(), "phone": phone.strip(), "bio": bio.strip()}).eq("id", user_id).execute()
+                st.success("Profiliniz güncellendi.")
+                st.rerun()
+            except Exception as exc:
+                feature_setup_message("Profil bilgileri", exc)
+    st.caption("Bir çalışanın adına dokunun; profili ve ilanları aşağıda görünür, ilana dokununca ilan açılır.")
     columns = st.columns(3)
     for index, person in enumerate(staff.to_dict("records")):
         person_id = str(person["id"])
@@ -1854,14 +2547,24 @@ def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.Dat
         columns[index % 3].button(label, key=f"employee_{person_id}", use_container_width=True, type="primary" if selected == person_id else "secondary", on_click=select_employee, args=(person_id,))
     if selected:
         person = staff[staff.id.astype(str) == selected]
-        if not person.empty and not properties.empty:
-            owned = properties[properties.owner_id.astype(str) == selected]
-            st.markdown(f"**{person.iloc[0]['name']}** — {len(owned)} ilan")
-            render_property_rows(client, owned.to_dict("records"), "emp", height=380)
-        elif not person.empty:
-            st.info("Bu çalışanın ilanı yok.")
+        if not person.empty:
+            row = person.iloc[0]
+            lines = [f"<b style='font-size:1.1rem'>{escape(str(row['name']))}</b> <span style='color:#667085'>· {escape(_clean(row.get('job_title')) or 'Çalışan')}</span>"]
+            if _clean(row.get("phone")):
+                lines.append(f"📞 {escape(_clean(row.get('phone')))}")
+            lines.append(escape(_clean(row.get("bio")) or "Bu çalışan henüz kendisi hakkında bilgi eklememiş.").replace("\n", "<br>"))
+            st.markdown("<div class='price-card'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
+            if selected != user_id:
+                with st.expander(f"✉️ {row['name']} kişisine mesaj gönder"):
+                    compose_message_form(client, user_id, staff, f"profile_{selected}", default_recipient=selected, lock_recipient=True)
+            owned = properties[properties.owner_id.astype(str) == selected] if not properties.empty else pd.DataFrame()
+            if owned.empty:
+                st.info("Bu çalışanın ilanı yok.")
+            else:
+                st.markdown(f"**{row['name']} — {len(owned)} ilan**")
+                render_property_rows(client, owned.to_dict("records"), "emp", height=340)
     if not is_admin:
-        st.caption("Çalışan listesi ofis yöneticisi tarafından Supabase profillerinden yönetilir.")
+        st.caption("Çalışan listesi ofis yöneticisi tarafından yönetilir.")
 
 
 # ---------- detaylı arama ----------
@@ -1880,7 +2583,66 @@ SORT_OPTIONS = {
 }
 
 
-def advanced_search_tab(client: Client, properties: pd.DataFrame) -> None:
+def load_saved_searches(client: Client, user_id: str) -> list[dict]:
+    return client.table("saved_searches").select("*").eq("user_id", user_id).order("created_at", desc=True).execute().data or []
+
+
+def apply_saved_search(filters: dict) -> None:
+    new_generation = st.session_state.get("adv_generation", 0) + 1
+    for name, value in (filters or {}).items():
+        st.session_state[f"adv_{name}_{new_generation}"] = value
+    st.session_state["adv_generation"] = new_generation
+
+
+def map_results(client: Client, frame: pd.DataFrame, favorites: set[str]) -> None:
+    latitude = pd.to_numeric(frame.get("latitude"), errors="coerce")
+    longitude = pd.to_numeric(frame.get("longitude"), errors="coerce")
+    geo = frame[latitude.notna() & longitude.notna()].copy()
+    geo["_lat"], geo["_lng"] = latitude[geo.index], longitude[geo.index]
+    missing = len(frame) - len(geo)
+    c1, c2, c3 = st.columns([3, 2, 1], vertical_alignment="center")
+    use_radius = c1.checkbox("📍 Merkez noktasına göre ara (haritaya dokunarak merkez seçin)", key="adv_use_radius")
+    radius = c2.slider("Yarıçap (km)", 0.5, 30.0, 5.0, 0.5, key="adv_radius", disabled=not use_radius)
+    center = st.session_state.get("adv_map_center")
+    c3.button("Merkezi temizle", key="adv_clear_center", disabled=not center, use_container_width=True, on_click=lambda: st.session_state.pop("adv_map_center", None))
+    if use_radius and center and not geo.empty:
+        geo = geo[geo.apply(lambda r: haversine_km(center[0], center[1], r["_lat"], r["_lng"]) <= radius, axis=1)]
+    st.caption(f"Haritada {len(geo)} ilan" + (f" · {missing} ilanın konumu işaretlenmemiş" if missing else "") + (f" · merkeze {radius:g} km içinde" if use_radius and center else ""))
+    if center:
+        view_center, zoom = center, 12
+    elif not geo.empty:
+        view_center, zoom = (float(geo["_lat"].mean()), float(geo["_lng"].mean())), 11
+    else:
+        view_center, zoom = TURKEY_CENTER, 6
+    fmap = folium.Map(location=view_center, zoom_start=zoom, control_scale=True)
+    for item in geo.to_dict("records"):
+        label = f"{_clean(item.get('title'))} — {money_text(item.get('price'))} ₺ · {_clean(item.get('rooms'))} [{item['id']}]"
+        color = "orange" if str(item["id"]) in favorites else ("blue" if _clean(item.get("deal_type")) == "Satılık" else "green")
+        folium.Marker([item["_lat"], item["_lng"]], tooltip=label, icon=folium.Icon(color=color)).add_to(fmap)
+    if center:
+        folium.Marker(center, tooltip="Arama merkezi", icon=folium.Icon(color="red", icon="star")).add_to(fmap)
+        if use_radius:
+            folium.Circle(center, radius=radius * 1000, color="#1d4ed8", fill=True, fill_opacity=0.08).add_to(fmap)
+    if not center and len(geo) > 1:
+        fmap.fit_bounds([[float(geo["_lat"].min()), float(geo["_lng"].min())], [float(geo["_lat"].max()), float(geo["_lng"].max())]], padding=(30, 30))
+    out = st_folium(fmap, height=420, use_container_width=True, key="adv_map", returned_objects=["last_clicked", "last_object_clicked_tooltip"])
+    clicked = (out or {}).get("last_clicked")
+    if use_radius and clicked and clicked != st.session_state.get("adv_last_click"):
+        st.session_state["adv_last_click"] = clicked
+        st.session_state["adv_map_center"] = (clicked["lat"], clicked["lng"])
+        st.rerun()
+    tooltip = (out or {}).get("last_object_clicked_tooltip")
+    found = re.search(r"\[([^\]]+)\]\s*$", tooltip or "")
+    if found:
+        match = geo[geo.id.astype(str) == found.group(1)]
+        if not match.empty:
+            item = match.iloc[0]
+            b1, b2 = st.columns([4, 1], vertical_alignment="center")
+            b1.markdown(f"**{_clean(item.get('title'))}** · {money_text(item.get('price'))} ₺ · {_clean(item.get('city'))}/{_clean(item.get('district'))} · {_clean(item.get('rooms'))}")
+            b2.button("İlanı aç", key="adv_map_open", type="primary", use_container_width=True, on_click=open_property, args=(str(item["id"]),))
+
+
+def advanced_search_tab(client: Client, properties: pd.DataFrame, user_id: str, favorites: set[str]) -> None:
     if properties.empty:
         st.info("Henüz daire kaydı yok.")
         return
@@ -1894,39 +2656,89 @@ def advanced_search_tab(client: Client, properties: pd.DataFrame) -> None:
             return []
         return sorted({_clean(v) for v in properties[column].dropna().unique() if _clean(v)})
 
+    def multi(col, label: str, name: str, choices: list[str]):
+        current = st.session_state.get(K(name))
+        if isinstance(current, list):
+            st.session_state[K(name)] = [v for v in current if v in choices]
+        return col.multiselect(label, choices, key=K(name))
+
+    if st.session_state.get(K("sort")) not in SORT_OPTIONS:
+        st.session_state.pop(K("sort"), None)
     with st.expander("🔎 Filtreler ve sıralama", expanded=True):
         r1 = st.columns([2, 1, 1, 1])
         text = r1[0].text_input("Anahtar kelime", key=K("text"), placeholder="Başlık, adres, site adı, açıklama")
-        deals = r1[1].multiselect("İşlem", ["Kiralık", "Satılık"], key=K("deal"))
-        categories = r1[2].multiselect("Emlak tipi", options("property_category"), key=K("category"))
-        statuses = r1[3].multiselect("Durum", options("status"), key=K("status"))
+        deals = multi(r1[1], "İşlem", "deal", ["Kiralık", "Satılık"])
+        categories = multi(r1[2], "Emlak tipi", "category", options("property_category"))
+        statuses = multi(r1[3], "Durum", "status", options("status"))
         r2 = st.columns(4)
-        cities = r2[0].multiselect("İl", options("city"), key=K("city"))
+        cities = multi(r2[0], "İl", "city", options("city"))
         pool = properties[properties.city.isin(cities)] if cities else properties
-        districts = r2[1].multiselect("İlçe", sorted({_clean(v) for v in pool.district.dropna().unique() if _clean(v)}), key=K("district"))
-        rooms = r2[2].multiselect("Oda sayısı", options("rooms"), key=K("rooms"))
-        owners = r2[3].multiselect("Sorumlu", options("sorumlu"), key=K("owner"))
+        districts = multi(r2[1], "İlçe", "district", sorted({_clean(v) for v in pool.district.dropna().unique() if _clean(v)}))
+        rooms = multi(r2[2], "Oda sayısı", "rooms", options("rooms"))
+        owners = multi(r2[3], "Sorumlu", "owner", options("sorumlu"))
         r3 = st.columns(4)
         price_min = r3[0].number_input("En düşük fiyat (₺)", min_value=0, step=10000, key=K("price_min"))
         price_max = r3[1].number_input("En yüksek fiyat (₺, 0 = sınırsız)", min_value=0, step=10000, key=K("price_max"))
         area_min = r3[2].number_input("En az brüt m²", min_value=0, step=5, key=K("area_min"))
         area_max = r3[3].number_input("En çok brüt m² (0 = sınırsız)", min_value=0, step=5, key=K("area_max"))
         r4 = st.columns(4)
-        ages = r4[0].multiselect("Bina yaşı", options("building_age"), key=K("age"))
-        floors = r4[1].multiselect("Bulunduğu kat", options("floor"), key=K("floor"))
-        heating = r4[2].multiselect("Isıtma", options("heating"), key=K("heating"))
-        parking = r4[3].multiselect("Otopark", options("parking"), key=K("parking"))
+        ages = multi(r4[0], "Bina yaşı", "age", options("building_age"))
+        floors = multi(r4[1], "Bulunduğu kat", "floor", options("floor"))
+        heating = multi(r4[2], "Isıtma", "heating", options("heating"))
+        parking = multi(r4[3], "Otopark", "parking", options("parking"))
         r5 = st.columns(4)
-        usage = r5[0].multiselect("Kullanım durumu", options("usage_status"), key=K("usage"))
-        deeds = r5[1].multiselect("Tapu durumu", options("title_deed_status"), key=K("deed"))
+        usage = multi(r5[0], "Kullanım durumu", "usage", options("usage_status"))
+        deeds = multi(r5[1], "Tapu durumu", "deed", options("title_deed_status"))
         sort_choice = r5[2].selectbox("Sıralama", list(SORT_OPTIONS), key=K("sort"))
         r5[3].button("Filtreleri temizle", on_click=reset_advanced_search, use_container_width=True, key=K("reset"))
         r6 = st.columns(6)
-        flags = {
-            "balcony": r6[0].checkbox("Balkon", key=K("balcony")), "elevator": r6[1].checkbox("Asansör", key=K("elevator")),
-            "furnished": r6[2].checkbox("Eşyalı", key=K("furnished")), "within_complex": r6[3].checkbox("Site içinde", key=K("complex")),
-            "loan_eligible": r6[4].checkbox("Krediye uygun", key=K("loan")), "swap_allowed": r6[5].checkbox("Takas", key=K("swap")),
-        }
+        flag_names = {"balcony": "balcony", "elevator": "elevator", "furnished": "furnished", "within_complex": "complex", "loan_eligible": "loan", "swap_allowed": "swap"}
+        flag_labels = {"balcony": "Balkon", "elevator": "Asansör", "furnished": "Eşyalı", "within_complex": "Site içinde", "loan_eligible": "Krediye uygun", "swap_allowed": "Takas"}
+        flags = {column: r6[index].checkbox(flag_labels[column], key=K(flag_names[column])) for index, column in enumerate(flag_names)}
+
+    filters = {
+        "text": text, "deal": deals, "category": categories, "status": statuses, "city": cities, "district": districts, "rooms": rooms, "owner": owners,
+        "price_min": price_min, "price_max": price_max, "area_min": area_min, "area_max": area_max, "age": ages, "floor": floors, "heating": heating,
+        "parking": parking, "usage": usage, "deed": deeds, "sort": sort_choice, **{flag_names[column]: value for column, value in flags.items()},
+    }
+    with st.expander("💾 Kayıtlı aramalar"):
+        try:
+            saved = load_saved_searches(client, user_id)
+        except Exception as exc:
+            feature_setup_message("Kayıtlı aramalar", exc)
+            saved = None
+        if saved is not None:
+            n1, n2 = st.columns([3, 1], vertical_alignment="bottom")
+            search_name = n1.text_input("Arama adı", key="saved_search_name", placeholder="Örn. Meram 3+1 satılık")
+            if n2.button("Aramayı kaydet", type="primary", key="saved_search_save", use_container_width=True):
+                if not search_name.strip():
+                    st.error("Aramaya bir ad verin.")
+                else:
+                    client.table("saved_searches").insert({"user_id": user_id, "name": search_name.strip(), "filters": filters}).execute()
+                    st.success("Arama kaydedildi.")
+                    st.rerun()
+            if saved:
+                labels = {str(s["id"]): s["name"] for s in saved}
+                chosen = st.selectbox("Kayıtlı aramalarım", list(labels), format_func=labels.get, key="saved_search_choice")
+                item = next(s for s in saved if str(s["id"]) == chosen)
+                b1, b2, b3, b4 = st.columns(4)
+                b1.button("Uygula", type="primary", key="saved_search_apply", use_container_width=True, on_click=apply_saved_search, args=(item.get("filters") or {},))
+                if b2.button("Filtrelerle güncelle", key="saved_search_update", use_container_width=True):
+                    client.table("saved_searches").update({"filters": filters, "updated_at": now_tr().isoformat()}).eq("id", chosen).execute()
+                    st.success("Kayıtlı arama güncellendi.")
+                    st.rerun()
+                if b3.button("Adı değiştir", key="saved_search_rename", use_container_width=True, help="Üstteki 'Arama adı' kutusuna yazdığınız yeni ad kullanılır."):
+                    if not search_name.strip():
+                        st.error("Önce 'Arama adı' kutusuna yeni adı yazın.")
+                    else:
+                        client.table("saved_searches").update({"name": search_name.strip(), "updated_at": now_tr().isoformat()}).eq("id", chosen).execute()
+                        st.rerun()
+                confirm = st.checkbox("Silmeyi onaylıyorum", key="saved_search_confirm")
+                if b4.button("Sil", key="saved_search_delete", disabled=not confirm, use_container_width=True):
+                    client.table("saved_searches").delete().eq("id", chosen).execute()
+                    st.rerun()
+            else:
+                st.caption("Henüz kayıtlı aramanız yok. Filtreleri ayarlayıp ad vererek kaydedin.")
 
     frame = properties.copy()
     frame["_price"] = pd.to_numeric(frame.get("price"), errors="coerce").fillna(0)
@@ -1955,9 +2767,15 @@ def advanced_search_tab(client: Client, properties: pd.DataFrame) -> None:
     sort_column, ascending = SORT_OPTIONS[sort_choice]
     if sort_column in frame:
         frame = frame.sort_values(sort_column, ascending=ascending, kind="stable")
-    total_price = int(frame["_price"].sum()) if not frame.empty else 0
-    st.caption(f"{len(frame)} ilan bulundu" + (f" · ortalama fiyat {money_text(total_price / len(frame))} ₺" if len(frame) else ""))
-    render_property_rows(client, frame.drop(columns=["_price", "_area", "_title"]).to_dict("records"), "adv", height=420)
+    average = f" · ortalama fiyat {money_text(frame['_price'].mean())} ₺" if len(frame) else ""
+    head1, head2 = st.columns([2, 1], vertical_alignment="center")
+    head1.caption(f"{len(frame)} ilan bulundu{average}")
+    view_mode = head2.radio("Sonuç görünümü", ["📋 Liste", "🗺️ Harita"], horizontal=True, key="adv_view_mode", label_visibility="collapsed")
+    results = frame.drop(columns=["_price", "_area", "_title"])
+    if view_mode.startswith("📋"):
+        render_property_rows(client, results.to_dict("records"), "adv", height=400, favorites=favorites)
+    else:
+        map_results(client, results, favorites)
 
 
 def main() -> None:
@@ -2034,21 +2852,39 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         location_data = ([], {})
         st.warning("İl/ilçe listesine şu anda ulaşılamadı; adres alanları geçici olarak elle doldurulabilir.")
     staff_names = dict(zip(staff.id, staff.name))
+    st.session_state["staff_names"] = {str(k): v for k, v in staff_names.items()}
+    settings = get_settings(client)
+    office_name = (settings.get("office_name") or DEFAULT_OFFICE_NAME).strip()
+    home_title = (settings.get("home_title") or DEFAULT_HOME_TITLE).strip()
+    st.session_state["office_name"] = office_name
+    favorites, favorites_available = load_favorites(client, current_id)
+    try:
+        messages_data, messages_available = load_messages(client, current_id), True
+    except Exception:
+        messages_data, messages_available = [], False
+    try:
+        reminders_data, reminders_available = load_reminders(client, current_id), True
+    except Exception:
+        reminders_data, reminders_available = [], False
+    unread_messages = sum(1 for m in messages_data if str(m["recipient_id"]) == current_id and not m.get("is_read") and not m.get("deleted_by_recipient"))
+    due_reminders, today_reminders = reminder_alerts(reminders_data) if reminders_available else ([], [])
     if not properties.empty:
         properties["sorumlu"] = properties.owner_id.map(staff_names).fillna("Atanmamış")
     if not requests.empty:
         requests["sorumlu"] = requests.owner_id.map(staff_names).fillna("Atanmamış")
 
-    section_names = ["Daireler", "Detaylı arama", "Müşteri talepleri", "Teklifler", "Yeni kayıt", "Çalışan özeti"]
+    section_names = ["Daireler", "Detaylı arama", "Müşteri talepleri", "Teklifler", "Ajanda", "Mesajlar", "Yeni kayıt", "Çalışan özeti"]
     if is_admin:
         section_names.append("Yönetici")
 
     with st.sidebar:
-        st.button("🏠 Ofis Portföyü · Ana sayfa", use_container_width=True, key="sidebar_home",
+        st.button(f"🏠 {office_name} · Ana sayfa", use_container_width=True, key="sidebar_home",
                   on_click=go_to_section, args=("Daireler",))
         st.markdown("### Bölümler")
+        badges = {"Ajanda": len(due_reminders) + len(today_reminders), "Mesajlar": unread_messages}
         for name in section_names:
-            st.button(name, key=f"nav_{name}", use_container_width=True,
+            badge = f" ({badges[name]})" if badges.get(name) else ""
+            st.button(name + badge, key=f"nav_{name}", use_container_width=True,
                       on_click=go_to_section, args=(name,))
         st.caption("İlan düzenleme Daireler bölümünde; yedekleme ve geri yükleme Yönetici bölümündedir." if is_admin else "İlan düzenleme Daireler bölümündedir.")
         st.caption(user.email)
@@ -2066,7 +2902,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
     head_left, head_right = st.columns([2, 3], vertical_alignment="center")
-    if head_left.button("🏠 Ofis genel görünümü", key="home_title", help="Daireler bölümüne git"):
+    if head_left.button(f"🏠 {home_title}", key="home_title", help="Daireler bölümüne git"):
         go_to_section("Daireler")
         st.rerun()
     head_right.markdown(
@@ -2074,6 +2910,19 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         f"<span class='chip'>Talep<b>{len(requests)}</b></span><span class='chip'>Yeni talep<b>{new_requests}</b></span></div>",
         unsafe_allow_html=True,
     )
+    show_announcements(client)
+    if not st.session_state.get("login_alerts_shown"):
+        st.session_state["login_alerts_shown"] = True
+        if due_reminders or today_reminders:
+            st.toast(f"⏰ Ajandanızda {len(due_reminders)} geciken, {len(today_reminders)} bugünkü hatırlatma var.")
+        if unread_messages:
+            st.toast(f"✉️ {unread_messages} okunmamış mesajınız var.")
+    notice = st.session_state.pop("message_notice", None)
+    if notice:
+        st.toast(notice)
+    feature_error = st.session_state.pop("feature_error", None)
+    if feature_error:
+        feature_setup_message(feature_error[0], Exception(feature_error[1]))
     save_notice = st.session_state.pop("property_save_notice", None)
     if save_notice:
         st.success(f"İlan kaydedildi; {save_notice['uploaded']} fotoğraf yüklendi.")
@@ -2097,30 +2946,43 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         selected_property_id = st.session_state.get("selected_property_id")
         detail_row = properties[properties.id.astype(str) == str(selected_property_id)] if selected_property_id and not properties.empty else pd.DataFrame()
         if not detail_row.empty:
-            show_property_detail(client, detail_row.iloc[0], current_id, is_admin, staff, location_data)
+            show_property_detail(client, detail_row.iloc[0], current_id, is_admin, staff, location_data, favorites)
         elif properties.empty:
             st.info("Henüz daire kaydı yok.")
         else:
-            f1, f2, f3 = st.columns([3, 1.3, 1.3])
-            search = f1.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
-            deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
-            status_filter = f3.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
-            view = properties.copy()
-            if search:
-                mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False, regex=False)).any(axis=1)
-                view = view[mask]
-            if deal_filter != "Tümü":
-                view = view[view.deal_type == deal_filter]
-            if status_filter != "Tümü":
-                view = view[view.status == status_filter]
-            st.caption(f"{len(view)} ilan · detay için satıra dokunun")
-            render_property_rows(client, view.to_dict("records"), "list", height=470)
+            view_mode = st.radio("Görünüm", ["Tüm ilanlar", "⭐ Favorilerim", "💹 Fiyat değişimleri"], horizontal=True, key="daire_view", label_visibility="collapsed")
+            if view_mode == "⭐ Favorilerim":
+                if favorites_available:
+                    favorites_view(client, current_id, properties, favorites)
+                else:
+                    feature_setup_message("Favoriler")
+            elif view_mode == "💹 Fiyat değişimleri":
+                price_changes_view(client, properties)
+            else:
+                f1, f2, f3 = st.columns([3, 1.3, 1.3])
+                search = f1.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
+                deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
+                status_filter = f3.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
+                view = properties.copy()
+                if search:
+                    mask = view[["title", "city", "district"]].fillna("").astype(str).apply(lambda col: col.str.contains(search, case=False, regex=False)).any(axis=1)
+                    view = view[mask]
+                if deal_filter != "Tümü":
+                    view = view[view.deal_type == deal_filter]
+                if status_filter != "Tümü":
+                    view = view[view.status == status_filter]
+                st.caption(f"{len(view)} ilan · detay için satıra dokunun")
+                render_property_rows(client, view.to_dict("records"), "list", height=440, favorites=favorites)
     with tab_by_name["Detaylı arama"]:
-        advanced_search_tab(client, properties)
+        advanced_search_tab(client, properties, current_id, favorites)
     with tab_by_name["Müşteri talepleri"]:
-        requests_tab(client, requests, properties)
+        requests_tab(client, requests, properties, staff, location_data, current_id, is_admin, favorites)
     with tab_by_name["Teklifler"]:
         offers_tab(client, properties, staff, current_id, is_admin)
+    with tab_by_name["Ajanda"]:
+        agenda_tab(client, current_id, properties, reminders_data, reminders_available)
+    with tab_by_name["Mesajlar"]:
+        messages_tab(client, staff, current_id, messages_data, messages_available, properties)
     with tab_by_name["Yeni kayıt"]:
         form1, form2 = st.tabs(["Daire ekle", "Talep ekle"])
         with form1:
@@ -2128,7 +2990,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         with form2:
             add_request(client, user.id, staff, location_data)
     with tab_by_name["Çalışan özeti"]:
-        employee_summary_tab(client, staff, properties, requests, is_admin)
+        employee_summary_tab(client, staff, properties, requests, is_admin, current_id)
     if is_admin:
         with tab_by_name["Yönetici"]:
             try:
