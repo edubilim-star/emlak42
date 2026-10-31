@@ -1966,17 +1966,11 @@ def render_property_rows(client: Client, items: list[dict], scope: str, notes: d
         for item in items:
             property_id = str(item["id"])
             area = _clean(item.get("area_m2")) or "—"
-            title = _clean(item.get("title")) or "Başlıksız ilan"
-            meta = " · ".join(part for part in [
-                _clean(item.get("deal_type")),
-                f"{_clean(item.get('city'))} / {_clean(item.get('district'))}",
-                _clean(item.get("rooms")),
-                f"{area} m²",
-                money_text(item.get("price")) + " ₺",
-                _clean(item.get("status")),
-                _clean(item.get("sorumlu")),
+            line = " · ".join(part for part in [
+                _clean(item.get("title")) or "Başlıksız ilan", _clean(item.get("deal_type")),
+                f"{_clean(item.get('city'))} / {_clean(item.get('district'))}", _clean(item.get("rooms")),
+                f"{area} m²", money_text(item.get("price")) + " ₺", _clean(item.get("status")), _clean(item.get("sorumlu")),
             ] if part)
-            line = f"**{title}**  \n{meta}"
             if favorites and property_id in favorites:
                 line = "⭐ " + line
             thumb = (store.get(property_id) or (0, None))[1]
@@ -1990,6 +1984,7 @@ def render_property_rows(client: Client, items: list[dict], scope: str, notes: d
                         st.caption(notes[property_id])
                     if row_action:
                         row_action(item, property_id)
+
 
 # ---------- müşteri talebi eşleştirme ----------
 def _room_key(value) -> str:
