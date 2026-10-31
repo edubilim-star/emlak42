@@ -3536,15 +3536,23 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
-    head_left, head_right = st.columns([2, 3], vertical_alignment="center")
-    if head_left.button(f"🏠 {home_title}", key="home_title", help="Daireler bölümüne git"):
+
+    # ===== MODERN NAVBAR =====
+    head_left, head_right = st.columns([2.2, 3], vertical_alignment="center")
+    if head_left.button(home_title, key="home_title", help="Daireler bölümüne git", use_container_width=True):
         go_to_section("Daireler")
         st.rerun()
     head_right.markdown(
-        f"<div class='summary-strip'><span class='chip'>Daire<b>{len(properties)}</b></span><span class='chip'>Aktif<b>{active}</b></span>"
-        f"<span class='chip'>Talep<b>{len(requests)}</b></span><span class='chip'>Yeni talep<b>{new_requests}</b></span></div>",
+        f"<div class='summary-strip'>"
+        f"<span class='chip'>Daire<b>{len(properties)}</b></span>"
+        f"<span class='chip'>Aktif<b>{active}</b></span>"
+        f"<span class='chip'>Talep<b>{len(requests)}</b></span>"
+        f"<span class='chip'>Yeni<b>{new_requests}</b></span>"
+        f"</div>",
         unsafe_allow_html=True,
     )
+    st.markdown("<div style='height:.5rem'></div>", unsafe_allow_html=True)
+
     show_announcements(client)
     if not st.session_state.get("login_alerts_shown"):
         st.session_state["login_alerts_shown"] = True
