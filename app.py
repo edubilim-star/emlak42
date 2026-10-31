@@ -59,7 +59,14 @@ st.markdown("""
 <style>
 .block-container { padding-top: 4.2rem; padding-bottom: 5rem; max-width: 1320px; }
 div[data-testid="stVerticalBlock"] { gap: .6rem; }
-button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
+div[data-baseweb="tab-list"] { gap: .35rem; background: #f1f5f9; padding: .3rem; border-radius: 14px; }
+div[data-baseweb="tab-highlight"], div[data-baseweb="tab-border"] { display: none !important; }
+button[role="tab"] { padding: .5rem 1rem !important; border-radius: 10px !important; background: transparent; transition: background .15s, color .15s; }
+button[role="tab"], button[role="tab"] * { color: #475569 !important; }
+button[role="tab"] p { font-size: .92rem; font-weight: 600; margin: 0; }
+button[role="tab"]:hover, button[role="tab"]:hover * { color: #1d4ed8 !important; }
+button[role="tab"][aria-selected="true"] { background: #ffffff !important; box-shadow: 0 1px 4px rgba(16,24,40,.14); }
+button[role="tab"][aria-selected="true"], button[role="tab"][aria-selected="true"] * { color: #1d4ed8 !important; }
 @media (max-width: 760px) {
   .block-container { padding: 3.8rem .8rem 4.5rem; }
   div[data-testid="stHorizontalBlock"] { flex-direction: column !important; gap: .45rem !important; }
@@ -72,55 +79,50 @@ button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
   h1 { font-size: 1.5rem !important; }
   h2 { font-size: 1.25rem !important; }
 }
-.st-key-topbar { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: .5rem 1rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); }
-.st-key-topbar button { background: none !important; border: 0 !important; box-shadow: none !important; min-height: 0 !important; padding: .3rem .6rem !important; }
-.st-key-topbar button, .st-key-topbar button * { color: #334155 !important; }
-.st-key-topbar button p { font-weight: 600; font-size: .95rem; margin: 0; }
-.st-key-topbar button:hover, .st-key-topbar button:hover * { color: #0284c7 !important; }
-.st-key-brand { position: relative; }
-.st-key-brand .brand { display: flex; align-items: center; gap: .55rem; padding: .15rem 0; }
-.st-key-brand .brand-logo { font-size: 1.7rem; line-height: 1; }
-.st-key-brand .brand-text { font-size: 1.3rem; font-weight: 800; color: #0f172a !important; line-height: 1.1; }
-.st-key-brand .brand-text b { color: #0284c7 !important; }
-.st-key-home_title { position: absolute; inset: 0; z-index: 5; }
-.st-key-home_title button { width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
-@media (max-width: 760px) {
-  .st-key-topbar div[data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; gap: .15rem !important; align-items: center !important; }
-  .st-key-topbar div[data-testid="stHorizontalBlock"] > div { width: auto !important; flex: 0 0 auto !important; min-width: 0 !important; }
-  .st-key-topbar div[data-testid="stHorizontalBlock"] > div:first-child { flex: 1 1 100% !important; }
-  .st-key-brand .brand-text { font-size: 1.1rem; }
-}
-.st-key-agent_card { position: relative; }
-.agent-card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem .8rem; text-align: center; box-shadow: 0 2px 10px rgba(16,24,40,.05); }
-.agent-card .agent-img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .55rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
-.agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2.1rem; font-weight: 700; color: #1e3a8a !important; }
+.st-key-home_title button { background: #1e3a8a !important; border: 0 !important; border-radius: 12px !important; padding: .5rem 1.1rem !important; min-height: 44px !important; box-shadow: none !important; }
+.st-key-home_title button, .st-key-home_title button * { color: #ffffff !important; }
+.st-key-home_title button p { font-size: 1.15rem; font-weight: 700; margin: 0; line-height: 1.2; }
+.st-key-home_title button:hover { background: #1d4ed8 !important; }
+.st-key-deal_agent_card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem 1rem .9rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); text-align: center; }
+.st-key-agent_card { position: relative; border-top: 1px solid #e4e7ec; padding-top: .8rem; cursor: pointer; }
+.agent-card { text-align: center; }
+.agent-card .agent-img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .5rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+.agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; color: #1e3a8a !important; }
 .agent-card .agent-name { font-size: 1.15rem; font-weight: 800; color: #0f172a !important; }
 .agent-card .agent-role { font-size: .82rem; color: #64748b !important; margin-top: .1rem; }
+.st-key-agent_card:hover .agent-name { color: #1d4ed8 !important; }
 .st-key-agent_open { position: absolute; inset: 0; z-index: 5; }
 .st-key-agent_open button { width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
+.st-key-agent_link button { background: none !important; border: 0 !important; box-shadow: none !important; min-height: 0 !important; padding: .1rem 0 !important; }
+.st-key-agent_link button, .st-key-agent_link button * { color: #1d4ed8 !important; }
+.st-key-agent_link button p { font-size: .85rem; font-weight: 600; }
 .st-key-agent_call a { background: #ff4d4f !important; border: 0 !important; border-radius: 12px !important; font-weight: 700; }
 .st-key-agent_call a, .st-key-agent_call a * { color: #ffffff !important; }
+.st-key-agent_profile_head { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem 1.2rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); }
+.agent-title { font-size: 1.6rem; font-weight: 800; color: #0f172a !important; line-height: 1.2; }
+.agent-sub { color: #64748b !important; margin-bottom: .4rem; }
 .info-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: .6rem; margin-top: .7rem; }
 .info-tile { background: #f9fafb; border: 1px solid #e4e7ec; border-radius: 12px; padding: .7rem .4rem; text-align: center; }
 .info-tile .it-icon { font-size: 1.4rem; line-height: 1.2; }
 .info-tile .it-label { font-weight: 700; font-size: .84rem; color: #0f172a !important; margin-top: .2rem; }
 .info-tile .it-value { font-size: .82rem; color: #64748b !important; margin-top: .1rem; }
 [class*="st-key-listing_row_"] button { text-align: left; min-height: 46px; padding: .35rem .8rem; white-space: normal; font-size: .9rem; }
-.summary-strip { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-start; margin: .5rem 0 .2rem; }
+.summary-strip { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
 .summary-strip .chip { background: #fff; border: 1px solid #e4e7ec; border-radius: 999px; padding: .2rem .75rem; font-size: .82rem; color: #475467 !important; }
 .summary-strip .chip b { color: #101828 !important; font-size: 1rem; margin-left: .35rem; }
 @media (max-width: 760px) { .summary-strip { justify-content: flex-start; } }
 .price-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: .6rem .9rem; line-height: 1.45; font-size: .9rem; color: #101828 !important; }
 .price-card .price { font-size: 1.7rem; font-weight: 800; color: #1d4ed8; line-height: 1.2; }
-.deal-card { text-align: center; background: linear-gradient(135deg, #1e3a8a, #2563eb); border-radius: 14px; padding: .85rem 1rem; box-shadow: 0 4px 14px rgba(30,58,138,.25); }
-.deal-card, .deal-card * { color: #ffffff !important; }
+.deal-card { text-align: center; }
+.deal-card, .deal-card * { color: #0f172a !important; }
 .deal-card .dc-top { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
-.deal-card .dc-price { font-size: 1.65rem; font-weight: 800; line-height: 1.15; }
-.deal-card .dc-price.muted { font-size: 1.05rem; font-weight: 600; opacity: .85; }
-.deal-card .dc-status { font-size: .74rem; font-weight: 700; padding: .2rem .7rem; border-radius: 999px; white-space: nowrap; }
-.deal-card .dc-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem; margin: .6rem 0 .5rem; }
-.deal-card .dc-chip { background: rgba(255,255,255,.18); border-radius: 999px; padding: .15rem .7rem; font-size: .8rem; }
-.deal-card .dc-row { font-size: .88rem; margin-top: .22rem; }
+.deal-card .dc-price { font-size: 1.7rem; font-weight: 800; line-height: 1.15; color: #1d4ed8 !important; }
+.deal-card .dc-price.muted { font-size: 1.05rem; font-weight: 600; color: #64748b !important; }
+.deal-card .dc-status { font-size: .74rem; font-weight: 700; padding: .2rem .75rem; border-radius: 999px; white-space: nowrap; }
+.deal-card .dc-status, .deal-card .dc-status * { color: #ffffff !important; }
+.deal-card .dc-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem; margin: .65rem 0 .5rem; }
+.deal-card .dc-chip { background: #f1f5f9; border-radius: 999px; padding: .15rem .7rem; font-size: .8rem; color: #334155 !important; }
+.deal-card .dc-row { font-size: .88rem; margin-top: .2rem; color: #475569 !important; }
 .hero { position: relative; height: 230px; border-radius: 16px; overflow: hidden; background-size: cover; background-position: center; background-color: #1e293b; }
 .hero .hero-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(8,16,36,.92) 0%, rgba(8,16,36,.45) 42%, rgba(0,0,0,0) 72%); }
 .hero .hero-body { position: absolute; left: 0; right: 0; bottom: 0; padding: 1rem 1.2rem; }
@@ -543,29 +545,31 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
         chips = [_clean(property_row.get("deal_type")), _clean(property_row.get("rooms")), (_clean(property_row.get("area_m2")) + " m²") if _clean(property_row.get("area_m2")) else "", _clean(property_row.get("property_category"))]
         chip_html = "".join(f"<span class='dc-chip'>{escape(chip)}</span>" for chip in chips if chip)
         price_html = f"<div class='dc-price'>{money_text(price_value)} ₺</div>" if price_value else "<div class='dc-price muted'>Fiyat belirtilmemiş</div>"
-        st.markdown(
-            f"<div class='deal-card'><div class='dc-top'>{price_html}<span class='dc-status' style='background:{status_color}'>{escape(status_text)}</span></div>"
-            f"<div class='dc-chips'>{chip_html}</div>"
-            f"<div class='dc-row'>📍 {escape(_clean(property_row.get('city')))} / {escape(_clean(property_row.get('district')))}</div>"
-            f"<div class='dc-row'>👤 Sorumlu: <b>{escape(_clean(property_row.get('sorumlu')) or 'Atanmamış')}</b></div></div>",
-            unsafe_allow_html=True,
-        )
         owner_id = str(property_row.get("owner_id"))
         agent = staff[staff.id.astype(str) == owner_id]
-        if not agent.empty:
-            person = agent.iloc[0]
-            avatar = avatar_bytes(client, owner_id)
-            if avatar:
-                image_html = f"<img class='agent-img' src='data:image/jpeg;base64,{base64.b64encode(avatar).decode('ascii')}'>"
-            else:
-                image_html = f"<div class='agent-img ph'>{escape(str(person['name'])[:1].upper())}</div>"
-            with st.container(key="agent_card"):
-                st.markdown(f"<div class='agent-card'>{image_html}<div class='agent-name'>{escape(str(person['name']))}</div><div class='agent-role'>{escape(_clean(person.get('job_title')) or 'Gayrimenkul Danışmanı')}</div></div>", unsafe_allow_html=True)
-                st.button("Danışman sayfasını aç", key="agent_open", on_click=open_employee, args=(owner_id,))
-            digits = "".join(ch for ch in _clean(person.get("phone")) if ch.isdigit() or ch == "+")
-            if digits:
-                with st.container(key="agent_call"):
-                    st.link_button("📞 Hemen Ara / İletişime Geç", f"tel:{digits}", use_container_width=True)
+        with st.container(key="deal_agent_card"):
+            st.markdown(
+                f"<div class='deal-card'><div class='dc-top'>{price_html}<span class='dc-status' style='background:{status_color}'>{escape(status_text)}</span></div>"
+                f"<div class='dc-chips'>{chip_html}</div>"
+                f"<div class='dc-row'>📍 {escape(_clean(property_row.get('city')))} / {escape(_clean(property_row.get('district')))}</div></div>",
+                unsafe_allow_html=True,
+            )
+            if not agent.empty:
+                person = agent.iloc[0]
+                avatar = avatar_bytes(client, owner_id)
+                if avatar:
+                    image_html = f"<img class='agent-img' src='data:image/jpeg;base64,{base64.b64encode(avatar).decode('ascii')}'>"
+                else:
+                    image_html = f"<div class='agent-img ph'>{escape(str(person['name'])[:1].upper())}</div>"
+                with st.container(key="agent_card"):
+                    st.markdown(f"<div class='agent-card'>{image_html}<div class='agent-name'>{escape(str(person['name']))}</div><div class='agent-role'>{escape(_clean(person.get('job_title')) or 'Gayrimenkul Danışmanı')}</div></div>", unsafe_allow_html=True)
+                    st.button("Danışman sayfasını aç", key="agent_open", on_click=open_employee, args=(owner_id,))
+                with st.container(key="agent_link"):
+                    st.button("Danışmanın sayfasını ve ilanlarını gör ›", key="agent_link_btn", on_click=open_employee, args=(owner_id,), use_container_width=True)
+                digits = "".join(ch for ch in _clean(person.get("phone")) if ch.isdigit() or ch == "+")
+                if digits:
+                    with st.container(key="agent_call"):
+                        st.link_button("📞 Hemen Ara / İletişime Geç", f"tel:{digits}", use_container_width=True)
         detail_rows = [
             ("Brüt / net m²", f"{property_row.get('area_m2') or '—'} / {property_row.get('net_area_m2') or '—'}"),
             ("Bina yaşı", property_row.get("building_age")),
@@ -1819,6 +1823,13 @@ def ensure_thumbs(client: Client, property_ids: list[str], budget: float = 6.0, 
         pool.shutdown(wait=False)
 
 
+TAB_ICONS = {"Daireler": "🏘️", "Detaylı arama": "🔎", "Müşteri talepleri": "👥", "Teklifler": "💰", "Ajanda": "📅", "Mesajlar": "✉️", "Yeni kayıt": "➕", "Çalışan özeti": "👤", "Yönetici": "🛠️"}
+
+
+def tab_label(name: str) -> str:
+    return f"{TAB_ICONS.get(name, '')} {name}".strip()
+
+
 def open_employee(employee_id: str) -> None:
     st.session_state["summary_employee"] = str(employee_id)
     st.session_state["pending_tab"] = "Çalışan özeti"
@@ -2666,22 +2677,15 @@ def _draw_note(canvas, text: str, color: str) -> None:
     from PIL import Image, ImageDraw
 
     width, height = canvas.size
-    note_w, note_h, margin = int(width * 0.30), int(height * 0.22), 50
-    layer = Image.new("RGBA", (note_w + 2 * margin, note_h + 2 * margin), (0, 0, 0, 0))
+    note_w, note_h, shadow = int(width * 0.26), int(height * 0.185), 7
+    layer = Image.new("RGBA", (note_w + shadow + 2, note_h + shadow + 2), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     paper = _hex_rgb(color)
-    draw.rectangle([margin + 8, margin + 9, margin + note_w + 8, margin + note_h + 9], fill=(0, 0, 0, 60))
+    draw.rectangle([shadow, shadow, note_w + shadow - 1, note_h + shadow - 1], fill=(0, 0, 0, 60))
     for y in range(note_h):
-        draw.line([(margin, margin + y), (margin + note_w, margin + y)], fill=_shade(paper, 1.07 - 0.13 * y / note_h) + (255,))
-
-    def tape(cx: int, cy: int, angle: int) -> None:
-        strip = Image.new("RGBA", (int(note_w * 0.26), int(note_h * 0.13)), (238, 226, 200, 215)).rotate(angle, expand=True, resample=Image.BICUBIC)
-        layer.paste(strip, (cx - strip.width // 2, cy - strip.height // 2), strip)
-
-    tape(margin + int(note_w * 0.05), margin + int(note_h * 0.04), 38)
-    tape(margin + int(note_w * 0.95), margin + int(note_h * 0.04), -38)
-    pad, icon_r = int(note_w * 0.07), int(note_h * 0.17)
-    icon_cx, icon_cy = margin + pad + icon_r, margin + pad + icon_r + int(note_h * 0.03)
+        draw.line([(0, y), (note_w - 1, y)], fill=_shade(paper, 1.07 - 0.13 * y / note_h) + (255,))
+    pad, icon_r = int(note_w * 0.07), int(note_h * 0.19)
+    icon_cx, icon_cy = pad + icon_r, pad + icon_r + int(note_h * 0.02)
     _draw_whatsapp_icon(draw, icon_cx, icon_cy, icon_r)
     words = text.split()
     size_px = int(note_h * 0.2)
@@ -2700,8 +2704,8 @@ def _draw_note(canvas, text: str, color: str) -> None:
                 current = word
         lines.append(current)
         line_h = int(size_px * 1.2)
-        bottom = margin + pad + 2 * icon_r + int(pad * 0.8) + max(len(lines) - 1, 0) * line_h + line_h
-        if bottom <= margin + note_h - pad // 2 or size_px <= 14:
+        bottom = pad + 2 * icon_r + int(pad * 0.5) + max(len(lines) - 1, 0) * line_h + line_h
+        if bottom <= note_h - pad // 2 or size_px <= 12:
             break
         size_px -= 2
     ink, outline = (255, 230, 110), _shade(paper, 0.5)
@@ -2709,10 +2713,9 @@ def _draw_note(canvas, text: str, color: str) -> None:
         if index == 0:
             x, y = icon_cx + icon_r + pad, icon_cy - int(size_px * 0.6)
         else:
-            x, y = margin + pad, margin + pad + 2 * icon_r + int(pad * 0.8) + (index - 1) * line_h
-        draw.text((x, y), line, font=font, fill=ink, stroke_width=2, stroke_fill=outline)
-    layer = layer.rotate(4, expand=True, resample=Image.BICUBIC)
-    canvas.paste(layer, (int(width * 0.005), int(height * 0.005)), layer)
+            x, y = pad, pad + 2 * icon_r + int(pad * 0.5) + (index - 1) * line_h
+        draw.text((x, y), line, font=font, fill=ink, stroke_width=1, stroke_fill=outline)
+    canvas.paste(layer, (0, 0), layer)
 
 
 def make_collage(images: list, label: str, style: str = "ribbon", color: str = "#F26B0F", size: tuple[int, int] = (1200, 900)):
@@ -3044,74 +3047,121 @@ def select_employee(employee_id: str) -> None:
     st.session_state["summary_employee"] = str(employee_id)
 
 
-def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.DataFrame, requests_df: pd.DataFrame, is_admin: bool, user_id: str) -> None:
-    selected = st.session_state.get("summary_employee")
+def wa_number(phone: str) -> str:
+    digits = "".join(ch for ch in phone if ch.isdigit())
+    if digits.startswith("0"):
+        return "90" + digits[1:]
+    if len(digits) == 10:
+        return "90" + digits
+    return digits
+
+
+def clear_employee() -> None:
+    st.session_state.pop("summary_employee", None)
+
+
+def profile_editor(client: Client, staff: pd.DataFrame, user_id: str) -> None:
     me = staff[staff.id.astype(str) == user_id]
-    with st.expander("👤 Profilimi düzenle"):
-        mine = me.iloc[0] if not me.empty else pd.Series(dtype=object)
-        job = st.text_input("Ünvan / görev", value=_clean(mine.get("job_title")), key="profile_job", placeholder="Örn. Gayrimenkul danışmanı")
-        phone = st.text_input("Telefon", value=_clean(mine.get("phone")), key="profile_phone")
-        bio = st.text_area("Hakkımda", value=_clean(mine.get("bio")), height=100, key="profile_bio", placeholder="Uzmanlık alanlarınız, çalıştığınız bölgeler, kısa tanıtım…")
-        p1, p2 = st.columns([1, 3], vertical_alignment="center")
-        with p1:
-            show_avatar(client, user_id, _clean(mine.get("name")), 96)
-        with p2:
-            photo = st.file_uploader("Profil fotoğrafı", type=["jpg", "jpeg", "png", "webp"], key="profile_photo")
-            q1, q2 = st.columns(2)
-            if q1.button("Fotoğrafı kaydet", disabled=not photo, key="profile_photo_save", use_container_width=True):
-                try:
-                    save_avatar(client, user_id, photo)
-                    st.success("Profil fotoğrafınız güncellendi.")
-                    st.rerun()
-                except Exception as exc:
-                    st.error("Fotoğraf yüklenemedi. Streamlit Secrets'ta service_role_key tanımlı olmalı.")
-                    st.caption(str(exc))
-            if q2.button("Fotoğrafı kaldır", disabled=avatar_bytes(client, user_id) is None, key="profile_photo_remove", use_container_width=True):
-                try:
-                    remove_avatar(client, user_id)
-                    st.rerun()
-                except Exception as exc:
-                    st.error("Fotoğraf kaldırılamadı.")
-                    st.caption(str(exc))
-        if st.button("Profili kaydet", type="primary", key="profile_save"):
+    mine = me.iloc[0] if not me.empty else pd.Series(dtype=object)
+    job = st.text_input("Ünvan / görev", value=_clean(mine.get("job_title")), key="profile_job", placeholder="Örn. Gayrimenkul danışmanı")
+    phone = st.text_input("Telefon", value=_clean(mine.get("phone")), key="profile_phone")
+    bio = st.text_area("Hakkımda", value=_clean(mine.get("bio")), height=100, key="profile_bio", placeholder="Uzmanlık alanlarınız, çalıştığınız bölgeler, kısa tanıtım…")
+    p1, p2 = st.columns([1, 3], vertical_alignment="center")
+    with p1:
+        show_avatar(client, user_id, _clean(mine.get("name")), 96)
+    with p2:
+        photo = st.file_uploader("Profil fotoğrafı", type=["jpg", "jpeg", "png", "webp"], key="profile_photo")
+        q1, q2 = st.columns(2)
+        if q1.button("Fotoğrafı kaydet", disabled=not photo, key="profile_photo_save", use_container_width=True):
             try:
-                service_client(client).table("profiles").update({"job_title": job.strip(), "phone": phone.strip(), "bio": bio.strip()}).eq("id", user_id).execute()
-                st.success("Profiliniz güncellendi.")
+                save_avatar(client, user_id, photo)
+                st.success("Profil fotoğrafınız güncellendi.")
                 st.rerun()
             except Exception as exc:
-                feature_setup_message("Profil bilgileri", exc)
-    st.caption("Bir çalışanın adına dokunun; profili ve ilanları aşağıda görünür, ilana dokununca ilan açılır.")
+                st.error("Fotoğraf yüklenemedi. Streamlit Secrets'ta service_role_key tanımlı olmalı.")
+                st.caption(str(exc))
+        if q2.button("Fotoğrafı kaldır", disabled=avatar_bytes(client, user_id) is None, key="profile_photo_remove", use_container_width=True):
+            try:
+                remove_avatar(client, user_id)
+                st.rerun()
+            except Exception as exc:
+                st.error("Fotoğraf kaldırılamadı.")
+                st.caption(str(exc))
+    if st.button("Profili kaydet", type="primary", key="profile_save"):
+        try:
+            service_client(client).table("profiles").update({"job_title": job.strip(), "phone": phone.strip(), "bio": bio.strip()}).eq("id", user_id).execute()
+            st.success("Profiliniz güncellendi.")
+            st.rerun()
+        except Exception as exc:
+            feature_setup_message("Profil bilgileri", exc)
+
+
+def agent_stats(person_id: str, properties: pd.DataFrame, requests_df: pd.DataFrame) -> tuple[pd.DataFrame, int, int, int]:
+    owned = properties[properties.owner_id.astype(str) == person_id] if not properties.empty else pd.DataFrame()
+    asked = requests_df[requests_df.owner_id.astype(str) == person_id] if not requests_df.empty else pd.DataFrame()
+    active = int((owned.status == "Aktif").sum()) if not owned.empty else 0
+    new_asked = int((asked.status == "Yeni").sum()) if not asked.empty else 0
+    return owned, active, len(asked), new_asked
+
+
+def agent_profile_page(client: Client, staff: pd.DataFrame, person: pd.Series, properties: pd.DataFrame, requests_df: pd.DataFrame, user_id: str) -> None:
+    person_id = str(person["id"])
+    owned, active, asked, new_asked = agent_stats(person_id, properties, requests_df)
+    st.button("← Tüm danışmanlar", key="agent_back", on_click=clear_employee)
+    with st.container(key="agent_profile_head"):
+        c1, c2 = st.columns([1, 3], vertical_alignment="center", gap="medium")
+        with c1:
+            show_avatar(client, person_id, str(person["name"]), 150)
+        with c2:
+            st.markdown(f"<div class='agent-title'>{escape(str(person['name']))}</div><div class='agent-sub'>{escape(_clean(person.get('job_title')) or 'Gayrimenkul Danışmanı')}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='summary-strip' style='justify-content:flex-start;margin:0 0 .5rem'><span class='chip'>İlan<b>{len(owned)}</b></span><span class='chip'>Aktif<b>{active}</b></span><span class='chip'>Talep<b>{asked}</b></span><span class='chip'>Yeni talep<b>{new_asked}</b></span></div>", unsafe_allow_html=True)
+            phone = _clean(person.get("phone"))
+            if phone:
+                st.markdown(f"📞 **{escape(phone)}**")
+                b1, b2 = st.columns(2)
+                digits = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+                b1.link_button("📞 Ara", f"tel:{digits}", use_container_width=True)
+                b2.link_button("💬 WhatsApp", f"https://wa.me/{wa_number(phone)}", use_container_width=True)
+            else:
+                st.caption("Bu danışman henüz telefon numarası eklememiş.")
+    st.markdown("#### Hakkında")
+    st.write(_clean(person.get("bio")) or "Bu danışman henüz kendisi hakkında bilgi eklememiş.")
+    if person_id != user_id:
+        with st.expander(f"✉️ {person['name']} kişisine mesaj gönder"):
+            compose_message_form(client, user_id, staff, f"profile_{person_id}", default_recipient=person_id, lock_recipient=True)
+    else:
+        with st.expander("✏️ Profilimi düzenle"):
+            profile_editor(client, staff, user_id)
+    st.markdown(f"#### İlanları ({len(owned)})")
+    if owned.empty:
+        st.info("Bu danışmanın henüz ilanı yok.")
+    else:
+        render_property_rows(client, owned.to_dict("records"), "emp", height=380)
+
+
+def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.DataFrame, requests_df: pd.DataFrame, is_admin: bool, user_id: str) -> None:
+    selected = st.session_state.get("summary_employee")
+    chosen = staff[staff.id.astype(str) == str(selected)] if selected else pd.DataFrame()
+    if not chosen.empty:
+        agent_profile_page(client, staff, chosen.iloc[0], properties, requests_df, user_id)
+        return
+    with st.expander("✏️ Profilimi düzenle"):
+        profile_editor(client, staff, user_id)
+    st.caption("Bir danışmana dokunun; bilgileri ve ilanları kendi sayfasında açılır.")
     columns = st.columns(3)
     for index, person in enumerate(staff.to_dict("records")):
         person_id = str(person["id"])
-        owned = properties[properties.owner_id.astype(str) == person_id] if not properties.empty else pd.DataFrame()
-        asked = requests_df[requests_df.owner_id.astype(str) == person_id] if not requests_df.empty else pd.DataFrame()
-        active = int((owned.status == "Aktif").sum()) if not owned.empty else 0
-        new_asked = int((asked.status == "Yeni").sum()) if not asked.empty else 0
-        label = f"👤 {person['name']} — {len(owned)} daire · {active} aktif · {len(asked)} talep ({new_asked} yeni)"
-        columns[index % 3].button(label, key=f"employee_{person_id}", use_container_width=True, type="primary" if selected == person_id else "secondary", on_click=select_employee, args=(person_id,))
-    if selected:
-        person = staff[staff.id.astype(str) == selected]
-        if not person.empty:
-            row = person.iloc[0]
-            lines = [f"<b style='font-size:1.1rem'>{escape(str(row['name']))}</b> <span style='color:#667085'>· {escape(_clean(row.get('job_title')) or 'Çalışan')}</span>"]
-            if _clean(row.get("phone")):
-                lines.append(f"📞 {escape(_clean(row.get('phone')))}")
-            lines.append(escape(_clean(row.get("bio")) or "Bu çalışan henüz kendisi hakkında bilgi eklememiş.").replace("\n", "<br>"))
-            card_img, card_text = st.columns([1, 5], vertical_alignment="center")
-            with card_img:
-                show_avatar(client, selected, str(row["name"]), 96)
-            with card_text:
-                st.markdown("<div class='price-card'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
-            if selected != user_id:
-                with st.expander(f"✉️ {row['name']} kişisine mesaj gönder"):
-                    compose_message_form(client, user_id, staff, f"profile_{selected}", default_recipient=selected, lock_recipient=True)
-            owned = properties[properties.owner_id.astype(str) == selected] if not properties.empty else pd.DataFrame()
-            if owned.empty:
-                st.info("Bu çalışanın ilanı yok.")
-            else:
-                st.markdown(f"**{row['name']} — {len(owned)} ilan**")
-                render_property_rows(client, owned.to_dict("records"), "emp", height=340)
+        owned, active, asked, new_asked = agent_stats(person_id, properties, requests_df)
+        with columns[index % 3]:
+            with st.container(border=True):
+                avatar = avatar_bytes(client, person_id)
+                if avatar:
+                    image_html = f"<img class='agent-img' src='data:image/jpeg;base64,{base64.b64encode(avatar).decode('ascii')}' style='width:84px;height:84px;border-radius:50%;object-fit:cover;display:block;margin:0 auto'>"
+                else:
+                    image_html = f"<div class='avatar-ph' style='margin:0 auto'>{escape(str(person['name'])[:1].upper())}</div>"
+                st.markdown(f"<div class='agent-card'>{image_html}</div>", unsafe_allow_html=True)
+                st.button(f"{person['name']}", key=f"employee_{person_id}", use_container_width=True, type="primary", on_click=select_employee, args=(person_id,))
+                st.caption(f"{_clean(person.get('job_title')) or 'Gayrimenkul Danışmanı'} · {len(owned)} ilan · {active} aktif · {asked} talep ({new_asked} yeni)")
     if not is_admin:
         st.caption("Çalışan listesi ofis yöneticisi tarafından yönetilir.")
 
@@ -3457,22 +3507,11 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
-    agenda_badge = f" ({len(due_reminders) + len(today_reminders)})" if (due_reminders or today_reminders) else ""
-    message_badge = f" ({unread_messages})" if unread_messages else ""
-    with st.container(key="topbar"):
-        nav = st.columns([4, 1, 1, 1.5, 1.2, 1.4], vertical_alignment="center")
-        with nav[0]:
-            with st.container(key="brand"):
-                words = home_title.split()
-                first, second = (" ".join(words[:-1]), words[-1]) if len(words) > 1 else (home_title[:-2], home_title[-2:])
-                st.markdown(f"<div class='brand'><span class='brand-logo'>🏠</span><span class='brand-text'>{escape(first)} <b>{escape(second)}</b></span></div>", unsafe_allow_html=True)
-                st.button(home_title, key="home_title", on_click=go_to_section, args=("Daireler",), help="Daireler bölümüne git")
-        nav[1].button("Satılık", key="top_sale", on_click=show_deal, args=("Satılık",), use_container_width=True)
-        nav[2].button("Kiralık", key="top_rent", on_click=show_deal, args=("Kiralık",), use_container_width=True)
-        nav[3].button("Danışmanlar", key="top_agents", on_click=go_to_section, args=("Çalışan özeti",), use_container_width=True)
-        nav[4].button("Ajanda" + agenda_badge, key="top_agenda", on_click=go_to_section, args=("Ajanda",), use_container_width=True)
-        nav[5].button("Mesajlar" + message_badge, key="top_messages", on_click=go_to_section, args=("Mesajlar",), use_container_width=True)
-    st.markdown(
+    head_left, head_right = st.columns([2, 3], vertical_alignment="center")
+    if head_left.button(f"🏠 {home_title}", key="home_title", help="Daireler bölümüne git"):
+        go_to_section("Daireler")
+        st.rerun()
+    head_right.markdown(
         f"<div class='summary-strip'><span class='chip'>Daire<b>{len(properties)}</b></span><span class='chip'>Aktif<b>{active}</b></span>"
         f"<span class='chip'>Talep<b>{len(requests)}</b></span><span class='chip'>Yeni talep<b>{new_requests}</b></span></div>",
         unsafe_allow_html=True,
@@ -3503,11 +3542,12 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
     if applied_tab not in section_names:
         applied_tab = None
     if applied_tab and TABS_STATE_SUPPORTED:
-        st.session_state["main_tabs"] = applied_tab
+        st.session_state["main_tabs"] = tab_label(applied_tab)
+    tab_labels = [tab_label(name) for name in section_names]
     if TABS_STATE_SUPPORTED:
-        tabs = st.tabs(section_names, key="main_tabs", on_change="rerun")
+        tabs = st.tabs(tab_labels, key="main_tabs", on_change="rerun")
     else:
-        tabs = st.tabs(section_names)
+        tabs = st.tabs(tab_labels)
     tab_by_name = dict(zip(section_names, tabs))
     with tab_by_name["Daireler"]:
         selected_property_id = st.session_state.get("selected_property_id")
@@ -3568,7 +3608,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
                 st.code(str(exc))
 
     if applied_tab:
-        switch_to_tab(applied_tab, click_tab=not TABS_STATE_SUPPORTED)
+        switch_to_tab(tab_label(applied_tab), click_tab=not TABS_STATE_SUPPORTED)
 
 
 main()
