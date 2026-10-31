@@ -2446,74 +2446,211 @@ def distance_tool(property_row: pd.Series) -> None:
     st_folium(fmap, height=260, use_container_width=True, key=f"dist_map_{property_id}", returned_objects=[])
 
 
+def _tr_upper(text: str) -> str:
+    return text.replace("i", "İ").replace("ı", "I").upper()
+
+
+def whatsapp_caption(row: pd.Series, phone: str = "", eids: bool = True) -> str:
+    def get(name: str) -> str:
+        value = _clean(row.get(name))
+        return "" if value in ("Belirtilmemiş", "Belirtilmedi") else value
+
+    lines = [f"🔥 {_tr_upper(get('title'))} 🔥"]
+    description = " ".join(get("description").split())
+    if description:
+        lines.append(description if len(description) <= 300 else description[:297].rstrip() + "…")
+    lines.append("")
+    address = get("address").split(",")[0].strip()
+    district, city = get("district"), get("city")
+    location = " / ".join(part for part in (district, address) if part)
+    lines.append(f"📍 Konum: {location}{' – ' + city if city else ''}")
+    gross, net = get("area_m2"), get("net_area_m2")
+    if gross and net and net != "0":
+        lines.append(f"📐 Metrekare: {net} m² Net / {gross} m² Brüt")
+    elif gross:
+        lines.append(f"📐 Metrekare: {gross} m²")
+    if get("rooms"):
+        kitchen = {"Kapalı": " (Kapalı Mutfak)", "Açık (Amerikan)": " (Açık Mutfak)"}.get(get("kitchen"), "")
+        lines.append(f"🏠 Oda Sayısı: {get('rooms')}{kitchen}")
+    if get("heating"):
+        heating = get("heating")
+        lines.append(f"♨️ Isıtma: {heating + ' Isıtma' if heating in ('Merkezi', 'Yerden ısıtma') and 'ısıtma' not in heating.lower() else heating}")
+    if get("bathroom_count"):
+        lines.append(f"🚿 Banyo: {get('bathroom_count')}")
+    if get("parking") and get("parking") != "Yok":
+        lines.append(f"🚗 Otopark: {'Sitede ' if row.get('within_complex') else ''}{get('parking')} Otopark")
+    if get("title_deed_status"):
+        loan = " (Krediye Uygun)" if row.get("loan_eligible") else ""
+        lines.append(f"🚪 Tapu Durumu: {get('title_deed_status')}{loan}")
+    lines.append("Detaylı bilgi ve randevu için hemen iletişime geçin:")
+    if eids:
+        lines += ["", "✅ EİDS Onaylı"]
+    price = money_text(row.get("price"))
+    lines += ["", f"🚨🚨🚨 *{price} TL{' / Ay' if get('deal_type') == 'Kiralık' else ''}*"]
+    if phone.strip():
+        lines += ["", f"📞 *{phone.strip()}*"]
+    return "\n".join(lines)
+
+
+def make_collage(images: list, banner: str, size: tuple[int, int] = (1200, 900)):
+    from PIL import Image, ImageDraw, ImageOps
+
+    width, height = size
+    gap = 5
+    canvas = Image.new("RGB", size, "white")
+    half_w, half_h = width // 2, height // 2
+    layouts = {
+        1: [(0, 0, width, height)],
+        2: [(0, 0, half_w - gap, height), (half_w + gap, 0, width, height)],
+        3: [(0, 0, half_w - gap, height), (half_w + gap, 0, width, half_h - gap), (half_w + gap, half_h + gap, width, height)],
+        4: [(0, 0, half_w - gap, half_h - gap), (half_w + gap, 0, width, half_h - gap), (0, half_h + gap, half_w - gap, height), (half_w + gap, half_h + gap, width, height)],
+    }
+    count = min(len(images), 4)
+    if count == 0:
+        ImageDraw.Draw(canvas).rectangle([0, 0, width, height], fill="#f2f4f7")
+    for box, image in zip(layouts.get(count, []), images[:4]):
+        canvas.paste(ImageOps.fit(image, (box[2] - box[0], box[3] - box[1]), method=Image.LANCZOS), (box[0], box[1]))
+    words = banner.replace("\n", " ").split()
+    if words:
+        s = width / 1448
+        overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+        layer = ImageDraw.Draw(overlay)
+        ribbon_w, top = int(560 * s), int(30 * s)
+        points = [(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(35 * s), top + int(205 * s)), (0, top + int(245 * s))]
+        layer.polygon([(x + int(8 * s), y + int(10 * s)) for x, y in points], fill=(0, 0, 0, 110))
+        layer.polygon(points, fill=(204, 16, 32, 255), outline=(110, 0, 10, 255))
+        layer.polygon([(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(8 * s), top + int(60 * s)), (0, top + int(95 * s))], fill=(255, 255, 255, 45))
+        canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+        draw = ImageDraw.Draw(canvas)
+        first, last = (" ".join(words[:-1]), words[-1]) if len(words) > 1 else ("", words[0])
+
+        def fit(text: str, start: int, max_width: int):
+            size_px = start
+            while size_px > 16 and draw.textlength(text, font=_font(size_px, True)) > max_width:
+                size_px -= 2
+            return _font(size_px, True)
+
+        max_width = ribbon_w - int(110 * s)
+        if first:
+            draw.text((int(45 * s), top + int(52 * s)), first, font=fit(first, int(54 * s), max_width), fill="white", stroke_width=max(2, int(3 * s)), stroke_fill=(90, 0, 8))
+        draw.text((int(55 * s), top + int(100 * s) if first else top + int(70 * s)), last, font=fit(last, int(100 * s), max_width), fill=(255, 224, 0), stroke_width=max(3, int(5 * s)), stroke_fill=(90, 0, 8))
+    return canvas
+
+
+def _jpeg_b64(image, max_side: int = 1280, quality: int = 82) -> str:
+    image = image.convert("RGB")
+    image.thumbnail((max_side, max_side))
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=quality)
+    return base64.b64encode(buffer.getvalue()).decode("ascii")
+
+
 WHATSAPP_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;font-family:system-ui,sans-serif}
-button{width:100%;padding:12px;border:0;border-radius:10px;background:#25D366;color:#fff;font-size:16px;font-weight:700;cursor:pointer}
+button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
+#all{background:#25D366;color:#fff}
+.row{display:flex;gap:8px;margin-top:8px}
+.row button{background:#e8f5e9;color:#14532d;padding:10px}
 #msg{margin-top:6px;font-size:13px;color:#475467}
-</style></head><body><button id="share" type="button">📲 WhatsApp'ta paylaş</button><div id="msg"></div>
+</style></head><body>
+<button id="all" type="button">📲 WhatsApp'ta paylaş (resim + metin)</button>
+<div class="row"><button id="textonly" type="button">Yalnızca metni paylaş</button><button id="copy" type="button">Metni kopyala</button></div>
+<div id="msg"></div>
 <script>
-const b64 = "__B64__"; const text = __TEXT__; const fileName = __NAME__;
-function makeFile() {
-  const bin = atob(b64); const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new File([bytes], fileName, {type: "image/jpeg"});
+const files64 = __FILES__; const text = __TEXT__;
+const msg = document.getElementById("msg");
+if (!files64.length) document.getElementById("all").style.display = "none";
+function makeFiles() {
+  return files64.map((b64, i) => {
+    const bin = atob(b64); const bytes = new Uint8Array(bin.length);
+    for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+    return new File([bytes], "ilan_" + (i + 1) + ".jpg", {type: "image/jpeg"});
+  });
 }
-document.getElementById("share").onclick = async () => {
-  const file = makeFile();
+async function tryShare(data) {
   const navs = [navigator];
   try { navs.push(window.parent.navigator); } catch (e) {}
   for (const nav of navs) {
     try {
-      if (nav.canShare && nav.canShare({files: [file]})) { await nav.share({files: [file], text: text}); return; }
-    } catch (e) { if (e && e.name === "AbortError") return; }
+      if (nav.share && (!data.files || (nav.canShare && nav.canShare(data)))) { await nav.share(data); return true; }
+    } catch (e) { if (e && e.name === "AbortError") return true; }
   }
-  const a = document.createElement("a"); a.href = "data:image/jpeg;base64," + b64; a.download = fileName;
-  document.body.appendChild(a); a.click(); a.remove();
-  window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank");
-  document.getElementById("msg").textContent = "Resim indirildi. WhatsApp'ta sohbeti seçip indirilen resmi ekleyin.";
+  return false;
+}
+async function copyText() {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try { await window.parent.navigator.clipboard.writeText(text); return true; } catch (e) {}
+  const area = document.createElement("textarea"); area.value = text; document.body.appendChild(area); area.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+  area.remove(); return ok;
+}
+function openWhatsApp() { window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank"); }
+document.getElementById("all").onclick = async () => {
+  const files = makeFiles();
+  if (await tryShare({files: files, text: text})) return;
+  files.forEach((file, i) => {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name;
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  await copyText();
+  msg.textContent = "Resimler indirildi, metin kopyalandı. WhatsApp'ta sohbeti seçin, resimleri ekleyin ve metni yapıştırın.";
+};
+document.getElementById("textonly").onclick = async () => {
+  if (await tryShare({text: text})) return;
+  const copied = await copyText();
+  msg.textContent = copied ? "Metin kopyalandı; WhatsApp'ta yapıştırabilirsiniz." : "";
+  openWhatsApp();
+};
+document.getElementById("copy").onclick = async () => {
+  msg.textContent = (await copyText()) ? "Metin kopyalandı." : "Kopyalanamadı; metni yukarıdaki kutudan elle kopyalayın.";
 };
 </script></body></html>"""
 
 
-def whatsapp_text(facts: list[tuple[str, str]]) -> str:
-    data = dict(facts)
-    lines = [f"🏠 {data.get('Başlık', '')}", f"💰 {data.get('Fiyat', '')} · {data.get('İşlem', '')}", f"📍 {data.get('İl', '')} / {data.get('İlçe', '')}"]
-    detail = " · ".join(part for part in (data.get("Oda sayısı"), f"{data['Brüt m²']} m²" if data.get("Brüt m²") else "") if part)
-    if detail:
-        lines.append(f"📐 {detail}")
-    if data.get("Sorumlu"):
-        lines.append(f"👤 {data['Sorumlu']}")
-    if data.get("Harita bağlantısı"):
-        lines.append(f"🗺️ {data['Harita bağlantısı']}")
-    return "\n".join(lines)
-
-
 def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[dict], office_name: str) -> None:
     property_id = str(row.id)
-    signature = f"{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
-    state_key = f"wa_{property_id}"
+    st.markdown("##### 📲 WhatsApp'ta paylaş")
+    mode = st.radio("Paylaşım biçimi", ["Kolaj + açıklama", "İlan sayfası + açıklama", "Yalnızca açıklama"], horizontal=True, key=f"wa_mode_{property_id}")
+    c1, c2 = st.columns(2)
+    default_phone = st.session_state.get("staff_phones", {}).get(str(row.get("owner_id")), "")
+    phone = c1.text_input("Telefon (açıklamada görünür)", value=default_phone, key=f"wa_phone_{property_id}")
+    banner = ""
+    if mode == "Kolaj + açıklama":
+        banner = c2.text_input("Kolaj üstündeki etiket", value="KANALA ÖZEL FİYAT", key=f"wa_banner_{property_id}", help="Son kelime büyük yazılır. Boş bırakırsanız etiket eklenmez.")
+    o1, o2 = st.columns(2)
+    eids = o1.checkbox("✅ EİDS Onaylı satırı ekle", value=True, key=f"wa_eids_{property_id}")
+    singles = o2.checkbox("Fotoğrafları tek tek de ekle (en fazla 4)", value=False, key=f"wa_singles_{property_id}") if mode == "Kolaj + açıklama" else False
+    generated = whatsapp_caption(row, phone, eids)
+    caption = st.text_area("Paylaşım metni (göndermeden önce düzenleyebilirsiniz)", value=generated, height=260, key=f"wa_caption_{property_id}_{abs(hash(generated))}")
+    if mode == "Yalnızca açıklama":
+        embed_html(WHATSAPP_HTML.replace("__FILES__", "[]").replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 130)
+        return
+    signature = f"{mode}|{banner}|{singles}|{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
+    state_key = f"wa_files_{property_id}"
     prepared = st.session_state.get(state_key)
     if prepared and prepared.get("sig") != signature:
         prepared = None
-    text = whatsapp_text(facts)
     if not prepared:
-        if st.button("📲 WhatsApp paylaşımını hazırla", key=f"wa_prepare_{property_id}", use_container_width=True):
+        if st.button("Paylaşım resimlerini hazırla", type="primary", key=f"wa_prepare_{property_id}", use_container_width=True):
             try:
-                with st.spinner("Paylaşım resmi hazırlanıyor…"):
-                    page = render_listing_image(facts, _fetch_images(photos), office_name)
-                    page = page.resize((1000, int(page.height * 1000 / page.width)))
-                    buffer = io.BytesIO()
-                    page.convert("RGB").save(buffer, "JPEG", quality=82)
-                st.session_state[state_key] = {"sig": signature, "b64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+                with st.spinner("Paylaşım resimleri hazırlanıyor…"):
+                    images = _fetch_images(photos, 4)
+                    if mode == "Kolaj + açıklama":
+                        files = [_jpeg_b64(make_collage(images, banner), 1200)]
+                        if singles:
+                            files += [_jpeg_b64(image) for image in images]
+                    else:
+                        page = render_listing_image(facts, images, office_name)
+                        files = [_jpeg_b64(page.resize((1000, int(page.height * 1000 / page.width))), 1800)]
+                st.session_state[state_key] = {"sig": signature, "files": files}
                 st.rerun()
             except Exception as exc:
                 st.error("Paylaşım resmi hazırlanamadı.")
                 st.caption(str(exc))
-        st.caption("İlanın paylaşım resmi hazırlanır; ardından WhatsApp'ta kişi veya grup seçerek gönderirsiniz.")
+        st.caption("Önce paylaşım resmi hazırlanır; ardından WhatsApp'ta kişi veya grup seçerek gönderirsiniz.")
     else:
-        html = WHATSAPP_HTML.replace("__B64__", prepared["b64"]).replace("__TEXT__", json.dumps(text).replace("</", "<\\/")).replace("__NAME__", json.dumps(f"ilan_{property_id[:8]}.jpg"))
-        embed_html(html, 90)
-    st.link_button("Yalnızca metni WhatsApp'ta aç", "https://wa.me/?text=" + quote(text), use_container_width=True)
+        st.image(base64.b64decode(prepared["files"][0]), width=300, caption="Paylaşılacak ana resim")
+        embed_html(WHATSAPP_HTML.replace("__FILES__", json.dumps(prepared["files"])).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 130)
 
 
 def select_employee(employee_id: str) -> None:
@@ -2853,6 +2990,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         st.warning("İl/ilçe listesine şu anda ulaşılamadı; adres alanları geçici olarak elle doldurulabilir.")
     staff_names = dict(zip(staff.id, staff.name))
     st.session_state["staff_names"] = {str(k): v for k, v in staff_names.items()}
+    st.session_state["staff_phones"] = {str(r["id"]): _clean(r.get("phone")) for r in staff.to_dict("records")}
     settings = get_settings(client)
     office_name = (settings.get("office_name") or DEFAULT_OFFICE_NAME).strip()
     home_title = (settings.get("home_title") or DEFAULT_HOME_TITLE).strip()
