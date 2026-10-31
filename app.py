@@ -238,21 +238,36 @@ def service_client(fallback: Client) -> Client:
 
 
 def login(client: Client) -> None:
-    st.title("🏠 Ofis Portföyü")
-    st.caption("Daireleri ve müşteri taleplerini tek ekranda yönetin.")
-    with st.form("login"):
-        email = st.text_input("E-posta")
-        password = st.text_input("Şifre", type="password")
-        submitted = st.form_submit_button("Giriş yap", type="primary")
-    if submitted:
-        try:
-            result = client.auth.sign_in_with_password({"email": email, "password": password})
-            st.session_state.user = result.user
-            st.session_state.supabase_access_token = result.session.access_token
-            st.session_state.supabase_refresh_token = result.session.refresh_token
-            st.rerun()
-        except Exception:
-            st.error("Giriş yapılamadı. E-posta ve şifrenizi kontrol edin.")
+    st.markdown(
+        """
+        <div style="display:flex;justify-content:center;align-items:center;gap:12px;margin:2rem 0 1rem;">
+          <div style="font-size:2.2rem;font-weight:800;letter-spacing:-1px;color:#0f172a;">
+            🏡 OFİS<span style="color:#0284c7;">PORTFÖY</span>
+          </div>
+        </div>
+        <p style="text-align:center;color:#64748b;margin-bottom:2rem;">
+          Daireleri ve müşteri taleplerini tek ekranda yönetin.
+        </p>
+        """,
+        unsafe_allow_html=True,
+    )
+    left, mid, right = st.columns([1, 1.4, 1])
+    with mid:
+        with st.container(border=True):
+            with st.form("login"):
+                st.markdown("#### Giriş yap")
+                email = st.text_input("E-posta", placeholder="ornek@ofis.com")
+                password = st.text_input("Şifre", type="password")
+                submitted = st.form_submit_button("Giriş yap", type="primary", use_container_width=True)
+            if submitted:
+                try:
+                    result = client.auth.sign_in_with_password({"email": email, "password": password})
+                    st.session_state.user = result.user
+                    st.session_state.supabase_access_token = result.session.access_token
+                    st.session_state.supabase_refresh_token = result.session.refresh_token
+                    st.rerun()
+                except Exception:
+                    st.error("Giriş yapılamadı. E-posta ve şifrenizi kontrol edin.")
 
 
 def rows(client: Client, table: str) -> list[dict]:
