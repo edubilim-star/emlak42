@@ -84,7 +84,7 @@ button[role="tab"][aria-selected="true"], button[role="tab"][aria-selected="true
 .st-key-home_title button p { font-size: 1.15rem; font-weight: 700; margin: 0; line-height: 1.2; }
 .st-key-home_title button:hover { background: #1d4ed8 !important; }
 .st-key-deal_agent_card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem 1rem .9rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); text-align: center; }
-.st-key-agent_card { position: relative; margin-top: 1.2rem; border-top: 1px solid #e4e7ec; padding-top: 1.2rem; cursor: pointer; }
+.st-key-agent_card { position: relative; border-top: 1px solid #e4e7ec; padding-top: .8rem; cursor: pointer; }
 .agent-card { text-align: center; }
 .agent-card .agent-img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .5rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
 .agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; color: #1e3a8a !important; }
@@ -2769,6 +2769,79 @@ def make_collage(images: list, label: str, style: str = "ribbon", color: str = "
     return canvas
 
 
+_EMOJI_RE = re.compile("[\U0001F000-\U0001FFFF\u2600-\u27BF\uFE0F\u200d]")
+
+
+def make_info_panel(caption: str, width: int = 1200):
+    from PIL import Image, ImageDraw
+
+    margin, max_w = 48, width - 96
+    probe = Image.new("RGB", (width, 3200), "white")
+    draw = ImageDraw.Draw(probe)
+    body, bold = _font(32), _font(32, True)
+    title_font, price_font, pill_font = _font(42, True), _font(72, True), _font(44, True)
+    ink, muted, accent = (15, 23, 42), (71, 85, 105), (37, 99, 235)
+    y = 40
+    draw.rectangle([0, 0, width, 8], fill=(242, 107, 15))
+    detail_marks = ("📍", "📐", "🏠", "♨", "🚿", "🚗", "🚪")
+    for raw in caption.splitlines():
+        line = raw.strip()
+        clean = _EMOJI_RE.sub("", line).replace("*", "").strip()
+        if not line:
+            y += 16
+        elif not clean:
+            continue
+        elif line.startswith("🔥"):
+            for part in _wrap_text(draw, clean, title_font, max_w):
+                draw.text((margin, y), part, font=title_font, fill=ink)
+                y += 56
+            y += 6
+        elif line.startswith("✅"):
+            pill_w = int(draw.textlength(clean, font=pill_font)) + 70
+            draw.rounded_rectangle([margin, y, margin + pill_w, y + 62], radius=31, fill=(22, 163, 74))
+            draw.text((margin + 35, y + 8), clean, font=pill_font, fill="white")
+            y += 84
+        elif line.startswith("🚨"):
+            draw.text((margin, y), clean, font=price_font, fill=(220, 38, 38))
+            y += 98
+        elif line.startswith("📞"):
+            pill_w = int(draw.textlength(clean, font=pill_font)) + 70
+            draw.rounded_rectangle([margin, y, margin + pill_w, y + 66], radius=33, fill=(37, 211, 102))
+            draw.text((margin + 35, y + 10), clean, font=pill_font, fill="white")
+            y += 90
+        elif line.startswith(detail_marks):
+            label, _, value = clean.partition(":")
+            draw.ellipse([margin, y + 14, margin + 16, y + 30], fill=accent)
+            label_text = label.strip() + ":"
+            label_w = int(draw.textlength(label_text + " ", font=bold))
+            draw.text((margin + 30, y), label_text, font=bold, fill=ink)
+            value_lines = _wrap_text(draw, value.strip(), body, max_w - 30 - label_w) or [""]
+            draw.text((margin + 30 + label_w, y), value_lines[0], font=body, fill=muted)
+            y += 46
+            for extra in value_lines[1:]:
+                draw.text((margin + 30 + label_w, y), extra, font=body, fill=muted)
+                y += 42
+        else:
+            for part in _wrap_text(draw, clean, body, max_w):
+                draw.text((margin, y), part, font=body, fill=muted)
+                y += 44
+    return probe.crop((0, 0, width, y + 40))
+
+
+def stack_images(top, bottom):
+    from PIL import Image
+
+    canvas = Image.new("RGB", (top.width, top.height + bottom.height), "white")
+    canvas.paste(top, (0, 0))
+    canvas.paste(bottom.resize((top.width, int(bottom.height * top.width / bottom.width))) if bottom.width != top.width else bottom, (0, top.height))
+    return canvas
+
+
+def _share_html(files: list[str], caption: str, single: bool = False) -> str:
+    return (WHATSAPP_HTML.replace("__FILES__", json.dumps(files)).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/"))
+            .replace("__SINGLE__", "true" if single else "false"))
+
+
 def _jpeg_b64(image, max_side: int = 1280, quality: int = 82) -> str:
     image = image.convert("RGB")
     image.thumbnail((max_side, max_side))
@@ -2789,8 +2862,13 @@ button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-w
 <div class="row"><button id="files" type="button">Yalnızca resim</button><button id="textonly" type="button">Yalnızca mesaj</button><button id="copy" type="button">Metni kopyala</button></div>
 <div id="msg"></div>
 <script>
-const files64 = __FILES__; const text = __TEXT__;
+const files64 = __FILES__; const text = __TEXT__; const single = __SINGLE__;
 const msg = document.getElementById("msg"); const seq = document.getElementById("seq");
+if (single) {
+  seq.textContent = "📲 WhatsApp'ta paylaş (resim üstte, bilgi altta)";
+  document.getElementById("files").style.display = "none";
+  document.getElementById("textonly").textContent = "Metni ayrıca paylaş";
+}
 const seqLabel = seq.textContent; let step = 0;
 if (!files64.length) {
   seq.style.display = "none"; document.getElementById("files").style.display = "none";
@@ -2836,6 +2914,14 @@ async function shareText() {
   return "fallback";
 }
 seq.onclick = async () => {
+  if (single) {
+    const files = makeFiles();
+    const result = await tryShare({files: files});
+    if (result === "ok" || result === "abort") return;
+    download(files);
+    msg.textContent = "Resim indirildi. WhatsApp'ta sohbeti seçip resmi ekleyin.";
+    return;
+  }
   if (step === 0) {
     const files = makeFiles();
     const result = await tryShare({files: files});
@@ -2867,7 +2953,7 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
     default_phone = st.session_state.get("staff_phones", {}).get(str(row.get("owner_id")), "")
     phone = c1.text_input("Telefon (açıklamada görünür)", value=default_phone, key=f"wa_phone_{property_id}")
     eids = c2.checkbox("✅ EİDS Onaylı satırı ekle", value=True, key=f"wa_eids_{property_id}")
-    label_style, label_text, color, singles = "none", "", "#F26B0F", False
+    label_style, label_text, color, singles, inline_text = "none", "", "#F26B0F", False, False
     if mode == "Kolaj + açıklama":
         l1, l2, l3 = st.columns([2, 3, 1.2], vertical_alignment="bottom")
         style_choice = l1.selectbox("Kolaj etiketi", ["Şerit etiket", "WhatsApp not kağıdı", "Etiket yok"], key=f"wa_label_style_{property_id}")
@@ -2876,13 +2962,14 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
             label_style = defaults[style_choice][0]
             label_text = l2.text_input("Etiket yazısı", value=defaults[style_choice][1], key=f"wa_label_text_{property_id}_{label_style}")
             color = l3.color_picker("Etiket rengi", "#F26B0F", key=f"wa_color_{property_id}")
+        inline_text = st.checkbox("Bilgi metnini resmin altına yaz (tek resim, tek dokunuş)", value=True, key=f"wa_inline_{property_id}", help="Açıkken kolaj üstte, bilgi metni altta tek bir resim olarak gider; sıra hiç değişmez. Kapalıysa resim ve metin ayrı ayrı gönderilir.")
         singles = st.checkbox("Fotoğrafları tek tek de ekle (en fazla 4)", value=False, key=f"wa_singles_{property_id}")
     generated = whatsapp_caption(row, phone, eids)
     caption = st.text_area("Paylaşım metni (göndermeden önce düzenleyebilirsiniz)", value=generated, height=260, key=f"wa_caption_{property_id}_{abs(hash(generated))}")
     if mode == "Yalnızca açıklama":
-        embed_html(WHATSAPP_HTML.replace("__FILES__", "[]").replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 70)
+        embed_html(_share_html([], caption), 70)
         return
-    signature = f"{mode}|{label_style}|{label_text}|{color}|{singles}|{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
+    signature = f"{mode}|{label_style}|{label_text}|{color}|{singles}|{inline_text}|{hash(caption) if inline_text else 0}|{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
     state_key = f"wa_files_{property_id}"
     prepared = st.session_state.get(state_key)
     if prepared and prepared.get("sig") != signature:
@@ -2893,7 +2980,8 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
                 with st.spinner("Paylaşım resimleri hazırlanıyor…"):
                     images = _fetch_images(photos, 4)
                     if mode == "Kolaj + açıklama":
-                        files = [_jpeg_b64(make_collage(images, label_text, label_style, color), 1200)]
+                        collage = make_collage(images, label_text, label_style, color)
+                        files = [_jpeg_b64(stack_images(collage, make_info_panel(caption, collage.width)), 1800) if inline_text else _jpeg_b64(collage, 1200)]
                         if singles:
                             files += [_jpeg_b64(image) for image in images]
                     else:
@@ -2904,10 +2992,10 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
             except Exception as exc:
                 st.error("Paylaşım resmi hazırlanamadı.")
                 st.caption(str(exc))
-        st.caption("Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle önce resim, sonra mesaj WhatsApp'ta gönderilir.")
+        st.caption("Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle WhatsApp'ta paylaşırsınız." if inline_text else "Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle önce resim, sonra mesaj WhatsApp'ta gönderilir.")
     else:
-        st.image(base64.b64decode(prepared["files"][0]), width=300, caption="Paylaşılacak ana resim")
-        embed_html(WHATSAPP_HTML.replace("__FILES__", json.dumps(prepared["files"])).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 190)
+        st.image(base64.b64decode(prepared["files"][0]), width=340 if inline_text else 300, caption="Paylaşılacak ana resim")
+        embed_html(_share_html(prepared["files"], caption, single=inline_text), 190)
 
 
 def avatar_bytes(client: Client, user_id: str) -> bytes | None:
