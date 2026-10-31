@@ -34,6 +34,21 @@ TABS_STATE_SUPPORTED = "key" in _TAB_PARAMS and "on_change" in _TAB_PARAMS
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
 DOWNLOAD_CALLABLE = "callable" in (st.download_button.__doc__ or "").lower()
 TZ = ZoneInfo("Europe/Istanbul")
+try:
+    from streamlit.delta_generator import DeltaGenerator as _DG
+
+    if "placeholder" in inspect.signature(_DG.multiselect).parameters and not getattr(_DG.multiselect, "_tr_patched", False):
+        _multiselect_original = _DG.multiselect
+
+        def _multiselect_tr(self, *args, **kwargs):
+            kwargs.setdefault("placeholder", "Seçiniz")
+            return _multiselect_original(self, *args, **kwargs)
+
+        _multiselect_tr._tr_patched = True
+        _DG.multiselect = _multiselect_tr
+        st.multiselect = lambda *args, **kwargs: _multiselect_tr(st._main, *args, **kwargs)
+except Exception:
+    pass
 DEFAULT_OFFICE_NAME = "Ofis Portföyü"
 DEFAULT_HOME_TITLE = "Ofis genel görünümü"
 NEW_SQL_FILE = "supabase_yeni_ozellikler.sql"
@@ -68,6 +83,32 @@ button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
 @media (max-width: 760px) { .summary-strip { justify-content: flex-start; } }
 .price-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: .6rem .9rem; line-height: 1.45; font-size: .9rem; color: #101828 !important; }
 .price-card .price { font-size: 1.7rem; font-weight: 800; color: #1d4ed8; line-height: 1.2; }
+.deal-card { background: linear-gradient(135deg, #1e3a8a, #2563eb); border-radius: 14px; padding: .85rem 1rem; box-shadow: 0 4px 14px rgba(30,58,138,.25); }
+.deal-card, .deal-card * { color: #ffffff !important; }
+.deal-card .dc-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.deal-card .dc-price { font-size: 1.65rem; font-weight: 800; line-height: 1.15; }
+.deal-card .dc-price.muted { font-size: 1.05rem; font-weight: 600; opacity: .85; }
+.deal-card .dc-status { font-size: .74rem; font-weight: 700; padding: .2rem .7rem; border-radius: 999px; white-space: nowrap; }
+.deal-card .dc-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0 .5rem; }
+.deal-card .dc-chip { background: rgba(255,255,255,.18); border-radius: 999px; padding: .15rem .7rem; font-size: .8rem; }
+.deal-card .dc-row { font-size: .88rem; margin-top: .22rem; }
+.hero { position: relative; height: 230px; border-radius: 16px; overflow: hidden; background-size: cover; background-position: center; background-color: #1e293b; }
+.hero .hero-shade { position: absolute; inset: 0; background: linear-gradient(to top, rgba(8,16,36,.92) 0%, rgba(8,16,36,.45) 42%, rgba(0,0,0,0) 72%); }
+.hero .hero-body { position: absolute; left: 0; right: 0; bottom: 0; padding: 1rem 1.2rem; }
+.hero, .hero * { color: #ffffff !important; }
+.hero .hero-badge { display: inline-block; background: #0284c7; font-size: .72rem; font-weight: 700; letter-spacing: .03em; padding: .2rem .7rem; border-radius: 999px; }
+.hero .hero-title { font-size: 1.35rem; font-weight: 700; line-height: 1.25; margin: .4rem 0 .35rem; text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+.hero .hero-meta { font-size: .9rem; opacity: .95; }
+.hero .hero-price { color: #38bdf8 !important; font-weight: 800; font-size: 1.1rem; margin-right: .6rem; }
+.hero-dots { text-align: center; letter-spacing: .25rem; font-size: .8rem; color: #667085; }
+.avatar-ph { width: 96px; height: 96px; border-radius: 50%; background: #e0e7ff; color: #1e3a8a !important; display: flex; align-items: center; justify-content: center; font-size: 2.2rem; font-weight: 700; }
+@media (max-width: 760px) {
+  .hero { height: 190px; }
+  .hero .hero-title { font-size: 1.1rem; }
+  [class*="st-key-hero_controls"] div[data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: nowrap !important; align-items: center !important; }
+  [class*="st-key-hero_controls"] div[data-testid="stHorizontalBlock"] > div { width: auto !important; flex: 1 1 auto !important; min-width: 0 !important; }
+  [class*="st-key-hero_controls"] div[data-testid="stHorizontalBlock"] > div:first-child, [class*="st-key-hero_controls"] div[data-testid="stHorizontalBlock"] > div:last-child { flex: 0 0 56px !important; }
+}
 .property-feature-table { width: 100%; border-collapse: collapse; font-size: .84rem; }
 .property-feature-table th, .property-feature-table td { padding: .28rem .55rem; border-bottom: 1px solid #eaecf0; text-align: left; background: #fff; color: #101828 !important; }
 .property-feature-table th { width: 45%; color: #475467 !important; font-weight: 600; background: #f9fafb; }
@@ -464,12 +505,17 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
             st.image(str(DEFAULT_PROPERTY_IMAGE), width="stretch", alt="İlan için varsayılan fotoğraf")
             st.caption("Bu ilana henüz fotoğraf eklenmemiş.")
     with right:
-        amount = f"{int(property_row.get('price') or 0):,}".replace(",", ".")
+        price_value = int(float(property_row.get("price") or 0))
+        status_text = _clean(property_row.get("status")) or "Aktif"
+        status_color = {"Aktif": "#16a34a", "Opsiyonlu": "#d97706", "Kiralandı/Satıldı": "#64748b", "Pasif": "#dc2626"}.get(status_text, "#475569")
+        chips = [_clean(property_row.get("deal_type")), _clean(property_row.get("rooms")), (_clean(property_row.get("area_m2")) + " m²") if _clean(property_row.get("area_m2")) else "", _clean(property_row.get("property_category"))]
+        chip_html = "".join(f"<span class='dc-chip'>{escape(chip)}</span>" for chip in chips if chip)
+        price_html = f"<div class='dc-price'>{money_text(price_value)} ₺</div>" if price_value else "<div class='dc-price muted'>Fiyat belirtilmemiş</div>"
         st.markdown(
-            f"<div class='price-card'><div class='price'>{amount} ₺</div>"
-            f"<div><b>{escape(str(property_row.get('deal_type', '')))}</b> · {escape(str(property_row.get('rooms') or 'Oda bilgisi yok'))}</div>"
-            f"<div>{escape(str(property_row.get('city', '')))} / {escape(str(property_row.get('district', '')))}</div>"
-            f"<div>Sorumlu: <b>{escape(str(property_row.get('sorumlu', 'Atanmamış')))}</b> · Durum: <b>{escape(str(property_row.get('status', 'Aktif')))}</b></div></div>",
+            f"<div class='deal-card'><div class='dc-top'>{price_html}<span class='dc-status' style='background:{status_color}'>{escape(status_text)}</span></div>"
+            f"<div class='dc-chips'>{chip_html}</div>"
+            f"<div class='dc-row'>📍 {escape(_clean(property_row.get('city')))} / {escape(_clean(property_row.get('district')))}</div>"
+            f"<div class='dc-row'>👤 Sorumlu: <b>{escape(_clean(property_row.get('sorumlu')) or 'Atanmamış')}</b></div></div>",
             unsafe_allow_html=True,
         )
         detail_rows = [
@@ -856,23 +902,21 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_dat
     holder: dict = {}
 
     def photo_tab() -> None:
-        holder["files"] = st.file_uploader("İlan fotoğrafları * (JPG, PNG veya WebP; her biri en fazla 10 MB, en fazla 20 adet)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="np_photos")
+        holder["files"] = st.file_uploader("İlan fotoğrafları (isteğe bağlı · JPG, PNG veya WebP; her biri en fazla 10 MB, en fazla 20 adet)", type=["jpg", "jpeg", "png", "webp"], accept_multiple_files=True, key="np_photos")
+        st.caption("Fotoğraf eklemezseniz ilanda varsayılan görsel gösterilir; fotoğrafı sonradan ilan detayından ekleyebilirsiniz.")
 
     with st.container(border=True):
         payload = property_form("np", {}, location_data, staff, default_owner=user_id, extra_tab=("Fotoğraflar", photo_tab))
         photos = holder.get("files")
-        saved = st.button("İlanı ve fotoğrafları kaydet", type="primary", use_container_width=True, key="save_new_property")
+        saved = st.button("İlanı kaydet", type="primary", use_container_width=True, key="save_new_property")
     if saved:
         if not payload["title"] or not payload["city"] or not payload["district"]:
             st.error("Başlık (Temel bilgiler), il ve ilçe (Konum ve adres) alanlarını doldurun.")
             return
-        if not photos:
-            st.error("İlanı kaydetmek için Fotoğraflar sekmesinden en az bir fotoğraf ekleyin.")
-            return
-        if len(photos) > 20:
+        if photos and len(photos) > 20:
             st.error("Bir ilana en fazla 20 fotoğraf ekleyebilirsiniz.")
             return
-        invalid = [f.name for f in photos if f.type not in {"image/jpeg", "image/png", "image/webp"} or len(f.getvalue()) > MAX_PHOTO_BYTES]
+        invalid = [f.name for f in (photos or []) if f.type not in {"image/jpeg", "image/png", "image/webp"} or len(f.getvalue()) > MAX_PHOTO_BYTES]
         if invalid:
             st.error("Fotoğrafları kontrol edin (JPG, PNG veya WebP; her biri en fazla 10 MB): " + ", ".join(invalid))
             return
@@ -880,7 +924,7 @@ def add_property(client: Client, user_id: str, staff: pd.DataFrame, location_dat
         try:
             result = client.table("properties").insert(payload).select("id").single().execute()
             property_id = str(result.data["id"])
-            count, errors = upload_property_photos(client, property_id, photos)
+            count, errors = upload_property_photos(client, property_id, photos) if photos else (0, [])
             st.session_state.property_save_notice = {"uploaded": count, "errors": errors}
             st.session_state.selected_property_id = property_id
             clear_form_state("np")
@@ -1134,10 +1178,10 @@ def build_excel(facts: list[tuple[str, str]], images: list | None = None, office
     return buffer.getvalue()
 
 
-def _font(size: int, bold: bool = False):
+def _font(size: int, bold: bool = False, note: bool = False):
     from PIL import ImageFont
 
-    name = "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf"
+    name = "DejaVuSerif-BoldItalic.ttf" if note else ("DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf")
     candidates = [Path(__file__).parent / "assets" / name]
     candidates += [Path(folder) / name for folder in ("/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu", "/usr/share/fonts/TTF")]
     try:
@@ -2492,7 +2536,90 @@ def whatsapp_caption(row: pd.Series, phone: str = "", eids: bool = True) -> str:
     return "\n".join(lines)
 
 
-def make_collage(images: list, banner: str, size: tuple[int, int] = (1200, 900)):
+def _hex_rgb(value: str) -> tuple[int, int, int]:
+    value = (value or "#F26B0F").lstrip("#")
+    try:
+        return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return (242, 107, 15)
+
+
+def _shade(color: tuple[int, int, int], factor: float) -> tuple[int, int, int]:
+    return tuple(max(0, min(255, int(c * factor))) for c in color)
+
+
+def _draw_whatsapp_icon(draw, cx: float, cy: float, r: float) -> None:
+    white, green = (255, 255, 255, 255), (37, 211, 102, 255)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=white)
+    draw.polygon([(cx - r * 0.98, cy + r * 0.98), (cx - r * 0.25, cy + r * 0.8), (cx - r * 0.92, cy + r * 0.2)], fill=white)
+    inner = r * 0.84
+    draw.ellipse([cx - inner, cy - inner, cx + inner, cy + inner], fill=green)
+    draw.polygon([(cx - r * 0.86, cy + r * 0.86), (cx - r * 0.3, cy + r * 0.72), (cx - r * 0.8, cy + r * 0.3)], fill=green)
+    hx, hy = cx + r * 0.04, cy - r * 0.04
+    outer, inner_r, start, end, steps = r * 0.52, r * 0.30, 85, 215, 40
+    points = [(hx + outer * math.cos(math.radians(start + (end - start) * i / steps)), hy + outer * math.sin(math.radians(start + (end - start) * i / steps))) for i in range(steps + 1)]
+    points += [(hx + inner_r * math.cos(math.radians(start + (end - start) * i / steps)), hy + inner_r * math.sin(math.radians(start + (end - start) * i / steps))) for i in range(steps, -1, -1)]
+    draw.polygon(points, fill=white)
+    middle = (outer + inner_r) / 2
+    for angle in (start, end):
+        ex, ey = hx + middle * math.cos(math.radians(angle)), hy + middle * math.sin(math.radians(angle))
+        draw.ellipse([ex - r * 0.19, ey - r * 0.19, ex + r * 0.19, ey + r * 0.19], fill=white)
+
+
+def _draw_note(canvas, text: str, color: str) -> None:
+    from PIL import Image, ImageDraw
+
+    width, height = canvas.size
+    note_w, note_h, margin = int(width * 0.40), int(height * 0.31), 50
+    layer = Image.new("RGBA", (note_w + 2 * margin, note_h + 2 * margin), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    paper = _hex_rgb(color)
+    draw.rectangle([margin + 8, margin + 9, margin + note_w + 8, margin + note_h + 9], fill=(0, 0, 0, 60))
+    for y in range(note_h):
+        draw.line([(margin, margin + y), (margin + note_w, margin + y)], fill=_shade(paper, 1.07 - 0.13 * y / note_h) + (255,))
+
+    def tape(cx: int, cy: int, angle: int) -> None:
+        strip = Image.new("RGBA", (int(note_w * 0.26), int(note_h * 0.13)), (238, 226, 200, 215)).rotate(angle, expand=True, resample=Image.BICUBIC)
+        layer.paste(strip, (cx - strip.width // 2, cy - strip.height // 2), strip)
+
+    tape(margin + int(note_w * 0.05), margin + int(note_h * 0.04), 38)
+    tape(margin + int(note_w * 0.95), margin + int(note_h * 0.04), -38)
+    pad, icon_r = int(note_w * 0.07), int(note_h * 0.17)
+    icon_cx, icon_cy = margin + pad + icon_r, margin + pad + icon_r + int(note_h * 0.03)
+    _draw_whatsapp_icon(draw, icon_cx, icon_cy, icon_r)
+    words = text.split()
+    size_px = int(note_h * 0.2)
+    while True:
+        font = _font(size_px, note=True)
+        first_width, other_width = note_w - (2 * icon_r + 3 * pad), note_w - 2 * pad
+        lines, current, limit = [], "", first_width
+        for word in words:
+            trial = f"{current} {word}".strip()
+            if draw.textlength(trial, font=font) <= limit:
+                current = trial
+            else:
+                if current:
+                    lines.append(current)
+                    limit = other_width
+                current = word
+        lines.append(current)
+        line_h = int(size_px * 1.2)
+        bottom = margin + pad + 2 * icon_r + int(pad * 0.8) + max(len(lines) - 1, 0) * line_h + line_h
+        if bottom <= margin + note_h - pad // 2 or size_px <= 14:
+            break
+        size_px -= 2
+    ink, outline = (255, 230, 110), _shade(paper, 0.5)
+    for index, line in enumerate(lines):
+        if index == 0:
+            x, y = icon_cx + icon_r + pad, icon_cy - int(size_px * 0.6)
+        else:
+            x, y = margin + pad, margin + pad + 2 * icon_r + int(pad * 0.8) + (index - 1) * line_h
+        draw.text((x, y), line, font=font, fill=ink, stroke_width=2, stroke_fill=outline)
+    layer = layer.rotate(4, expand=True, resample=Image.BICUBIC)
+    canvas.paste(layer, (int(width * 0.005), int(height * 0.005)), layer)
+
+
+def make_collage(images: list, label: str, style: str = "ribbon", color: str = "#F26B0F", size: tuple[int, int] = (1200, 900)):
     from PIL import Image, ImageDraw, ImageOps
 
     width, height = size
@@ -2510,30 +2637,36 @@ def make_collage(images: list, banner: str, size: tuple[int, int] = (1200, 900))
         ImageDraw.Draw(canvas).rectangle([0, 0, width, height], fill="#f2f4f7")
     for box, image in zip(layouts.get(count, []), images[:4]):
         canvas.paste(ImageOps.fit(image, (box[2] - box[0], box[3] - box[1]), method=Image.LANCZOS), (box[0], box[1]))
-    words = banner.replace("\n", " ").split()
-    if words:
-        s = width / 1448
-        overlay = Image.new("RGBA", size, (0, 0, 0, 0))
-        layer = ImageDraw.Draw(overlay)
-        ribbon_w, top = int(560 * s), int(30 * s)
-        points = [(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(35 * s), top + int(205 * s)), (0, top + int(245 * s))]
-        layer.polygon([(x + int(8 * s), y + int(10 * s)) for x, y in points], fill=(0, 0, 0, 110))
-        layer.polygon(points, fill=(204, 16, 32, 255), outline=(110, 0, 10, 255))
-        layer.polygon([(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(8 * s), top + int(60 * s)), (0, top + int(95 * s))], fill=(255, 255, 255, 45))
-        canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
-        draw = ImageDraw.Draw(canvas)
-        first, last = (" ".join(words[:-1]), words[-1]) if len(words) > 1 else ("", words[0])
+    words = label.replace("\n", " ").split()
+    if not words or style == "none":
+        return canvas
+    if style == "note":
+        _draw_note(canvas, " ".join(words), color)
+        return canvas
+    s = width / 1448
+    base = _hex_rgb(color)
+    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
+    layer = ImageDraw.Draw(overlay)
+    ribbon_w, top = int(560 * s), int(30 * s)
+    points = [(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(35 * s), top + int(205 * s)), (0, top + int(245 * s))]
+    layer.polygon([(x + int(8 * s), y + int(10 * s)) for x, y in points], fill=(0, 0, 0, 110))
+    layer.polygon(points, fill=base + (255,), outline=_shade(base, 0.55) + (255,))
+    layer.polygon([(0, top + int(40 * s)), (ribbon_w, top), (ribbon_w - int(8 * s), top + int(60 * s)), (0, top + int(95 * s))], fill=(255, 255, 255, 50))
+    canvas = Image.alpha_composite(canvas.convert("RGBA"), overlay).convert("RGB")
+    draw = ImageDraw.Draw(canvas)
+    first, last = (" ".join(words[:-1]), words[-1]) if len(words) > 1 else ("", words[0])
 
-        def fit(text: str, start: int, max_width: int):
-            size_px = start
-            while size_px > 16 and draw.textlength(text, font=_font(size_px, True)) > max_width:
-                size_px -= 2
-            return _font(size_px, True)
+    def fit(text: str, start: int, max_width: int):
+        size_px = start
+        while size_px > 16 and draw.textlength(text, font=_font(size_px, True)) > max_width:
+            size_px -= 2
+        return _font(size_px, True)
 
-        max_width = ribbon_w - int(110 * s)
-        if first:
-            draw.text((int(45 * s), top + int(52 * s)), first, font=fit(first, int(54 * s), max_width), fill="white", stroke_width=max(2, int(3 * s)), stroke_fill=(90, 0, 8))
-        draw.text((int(55 * s), top + int(100 * s) if first else top + int(70 * s)), last, font=fit(last, int(100 * s), max_width), fill=(255, 224, 0), stroke_width=max(3, int(5 * s)), stroke_fill=(90, 0, 8))
+    stroke = _shade(base, 0.4)
+    max_width = ribbon_w - int(110 * s)
+    if first:
+        draw.text((int(45 * s), top + int(52 * s)), first, font=fit(first, int(54 * s), max_width), fill="white", stroke_width=max(2, int(3 * s)), stroke_fill=stroke)
+    draw.text((int(55 * s), top + int(100 * s) if first else top + int(70 * s)), last, font=fit(last, int(100 * s), max_width), fill=(255, 235, 120), stroke_width=max(3, int(5 * s)), stroke_fill=stroke)
     return canvas
 
 
@@ -2547,19 +2680,24 @@ def _jpeg_b64(image, max_side: int = 1280, quality: int = 82) -> str:
 
 WHATSAPP_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
 body{margin:0;font-family:system-ui,sans-serif}
-button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer}
-#all{background:#25D366;color:#fff}
-.row{display:flex;gap:8px;margin-top:8px}
+button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px}
+.main{background:#25D366;color:#fff}
+.row{display:flex;gap:8px}
 .row button{background:#e8f5e9;color:#14532d;padding:10px}
-#msg{margin-top:6px;font-size:13px;color:#475467}
+#msg{margin-top:2px;font-size:13px;color:#475467}
 </style></head><body>
-<button id="all" type="button">📲 WhatsApp'ta paylaş (resim + metin)</button>
-<div class="row"><button id="textonly" type="button">Yalnızca metni paylaş</button><button id="copy" type="button">Metni kopyala</button></div>
+<button id="files" class="main" type="button">① Önce kolajı paylaş (resimler)</button>
+<button id="textonly" class="main" type="button">② Sonra bilgi metnini paylaş</button>
+<div class="row"><button id="all" type="button">Resim + metin birlikte</button><button id="copy" type="button">Metni kopyala</button></div>
 <div id="msg"></div>
 <script>
 const files64 = __FILES__; const text = __TEXT__;
 const msg = document.getElementById("msg");
-if (!files64.length) document.getElementById("all").style.display = "none";
+if (!files64.length) {
+  document.getElementById("files").style.display = "none";
+  document.getElementById("all").style.display = "none";
+  document.getElementById("textonly").textContent = "Bilgi metnini paylaş";
+}
 function makeFiles() {
   return files64.map((b64, i) => {
     const bin = atob(b64); const bytes = new Uint8Array(bin.length);
@@ -2584,22 +2722,31 @@ async function copyText() {
   let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
   area.remove(); return ok;
 }
-function openWhatsApp() { window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank"); }
-document.getElementById("all").onclick = async () => {
-  const files = makeFiles();
-  if (await tryShare({files: files, text: text})) return;
-  files.forEach((file, i) => {
+function download(files) {
+  files.forEach((file) => {
     const a = document.createElement("a"); a.href = URL.createObjectURL(file); a.download = file.name;
     document.body.appendChild(a); a.click(); a.remove();
   });
-  await copyText();
-  msg.textContent = "Resimler indirildi, metin kopyalandı. WhatsApp'ta sohbeti seçin, resimleri ekleyin ve metni yapıştırın.";
+}
+function openWhatsApp() { window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank"); }
+document.getElementById("files").onclick = async () => {
+  const files = makeFiles();
+  if (await tryShare({files: files})) { msg.textContent = "Şimdi ② ile bilgi metnini gönderin."; return; }
+  download(files);
+  msg.textContent = "Resimler indirildi. WhatsApp'ta sohbeti seçip ekleyin, sonra ② ile bilgi metnini gönderin.";
 };
 document.getElementById("textonly").onclick = async () => {
   if (await tryShare({text: text})) return;
   const copied = await copyText();
   msg.textContent = copied ? "Metin kopyalandı; WhatsApp'ta yapıştırabilirsiniz." : "";
   openWhatsApp();
+};
+document.getElementById("all").onclick = async () => {
+  const files = makeFiles();
+  if (await tryShare({files: files, text: text})) return;
+  download(files);
+  await copyText();
+  msg.textContent = "Resimler indirildi, metin kopyalandı. WhatsApp'ta resimleri ekleyip metni yapıştırın.";
 };
 document.getElementById("copy").onclick = async () => {
   msg.textContent = (await copyText()) ? "Metin kopyalandı." : "Kopyalanamadı; metni yukarıdaki kutudan elle kopyalayın.";
@@ -2614,18 +2761,23 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
     c1, c2 = st.columns(2)
     default_phone = st.session_state.get("staff_phones", {}).get(str(row.get("owner_id")), "")
     phone = c1.text_input("Telefon (açıklamada görünür)", value=default_phone, key=f"wa_phone_{property_id}")
-    banner = ""
+    eids = c2.checkbox("✅ EİDS Onaylı satırı ekle", value=True, key=f"wa_eids_{property_id}")
+    label_style, label_text, color, singles = "none", "", "#F26B0F", False
     if mode == "Kolaj + açıklama":
-        banner = c2.text_input("Kolaj üstündeki etiket", value="KANALA ÖZEL FİYAT", key=f"wa_banner_{property_id}", help="Son kelime büyük yazılır. Boş bırakırsanız etiket eklenmez.")
-    o1, o2 = st.columns(2)
-    eids = o1.checkbox("✅ EİDS Onaylı satırı ekle", value=True, key=f"wa_eids_{property_id}")
-    singles = o2.checkbox("Fotoğrafları tek tek de ekle (en fazla 4)", value=False, key=f"wa_singles_{property_id}") if mode == "Kolaj + açıklama" else False
+        l1, l2, l3 = st.columns([2, 3, 1.2], vertical_alignment="bottom")
+        style_choice = l1.selectbox("Kolaj etiketi", ["Şerit etiket", "WhatsApp not kağıdı", "Etiket yok"], key=f"wa_label_style_{property_id}")
+        defaults = {"Şerit etiket": ("ribbon", "KANALA ÖZEL FİYAT"), "WhatsApp not kağıdı": ("note", "Sadece WhatsApp Kanalına Özel")}
+        if style_choice in defaults:
+            label_style = defaults[style_choice][0]
+            label_text = l2.text_input("Etiket yazısı", value=defaults[style_choice][1], key=f"wa_label_text_{property_id}_{label_style}")
+            color = l3.color_picker("Etiket rengi", "#F26B0F", key=f"wa_color_{property_id}")
+        singles = st.checkbox("Fotoğrafları tek tek de ekle (en fazla 4)", value=False, key=f"wa_singles_{property_id}")
     generated = whatsapp_caption(row, phone, eids)
     caption = st.text_area("Paylaşım metni (göndermeden önce düzenleyebilirsiniz)", value=generated, height=260, key=f"wa_caption_{property_id}_{abs(hash(generated))}")
     if mode == "Yalnızca açıklama":
-        embed_html(WHATSAPP_HTML.replace("__FILES__", "[]").replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 130)
+        embed_html(WHATSAPP_HTML.replace("__FILES__", "[]").replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 70)
         return
-    signature = f"{mode}|{banner}|{singles}|{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
+    signature = f"{mode}|{label_style}|{label_text}|{color}|{singles}|{hash(tuple(facts))}|{'|'.join(p['name'] for p in photos[:4])}"
     state_key = f"wa_files_{property_id}"
     prepared = st.session_state.get(state_key)
     if prepared and prepared.get("sig") != signature:
@@ -2636,7 +2788,7 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
                 with st.spinner("Paylaşım resimleri hazırlanıyor…"):
                     images = _fetch_images(photos, 4)
                     if mode == "Kolaj + açıklama":
-                        files = [_jpeg_b64(make_collage(images, banner), 1200)]
+                        files = [_jpeg_b64(make_collage(images, label_text, label_style, color), 1200)]
                         if singles:
                             files += [_jpeg_b64(image) for image in images]
                     else:
@@ -2647,10 +2799,143 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
             except Exception as exc:
                 st.error("Paylaşım resmi hazırlanamadı.")
                 st.caption(str(exc))
-        st.caption("Önce paylaşım resmi hazırlanır; ardından WhatsApp'ta kişi veya grup seçerek gönderirsiniz.")
+        st.caption("Önce paylaşım resmi hazırlanır. Ardından önce ① ile kolajı, sonra ② ile bilgi metnini WhatsApp'ta gönderirsiniz.")
     else:
         st.image(base64.b64decode(prepared["files"][0]), width=300, caption="Paylaşılacak ana resim")
-        embed_html(WHATSAPP_HTML.replace("__FILES__", json.dumps(prepared["files"])).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 130)
+        embed_html(WHATSAPP_HTML.replace("__FILES__", json.dumps(prepared["files"])).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 190)
+
+
+def avatar_bytes(client: Client, user_id: str) -> bytes | None:
+    store = thumb_store()
+    key = f"avatar:{user_id}"
+    cached = store.get(key)
+    if cached and cached[0] > time.time():
+        return cached[1]
+    data = None
+    try:
+        bucket = client.storage.from_(PHOTO_BUCKET)
+        objects = bucket.list(f"avatars/{user_id}", {"limit": 5}) or []
+        first = next((o for o in objects if o.get("id")), None)
+        data = bucket.download(f"avatars/{user_id}/{first['name']}") if first else None
+    except Exception:
+        data = None
+    store[key] = (time.time() + 900, data)
+    return data
+
+
+def save_avatar(client: Client, user_id: str, upload) -> None:
+    from PIL import Image, ImageOps
+
+    image = ImageOps.exif_transpose(Image.open(io.BytesIO(upload.getvalue()))).convert("RGB")
+    image = ImageOps.fit(image, (400, 400), method=Image.LANCZOS)
+    buffer = io.BytesIO()
+    image.save(buffer, "JPEG", quality=85)
+    bucket = service_client(client).storage.from_(PHOTO_BUCKET)
+    bucket.upload(f"avatars/{user_id}/avatar.jpg", buffer.getvalue(), file_options={"content-type": "image/jpeg", "upsert": "true"})
+    thumb_store().pop(f"avatar:{user_id}", None)
+
+
+def remove_avatar(client: Client, user_id: str) -> None:
+    service_client(client).storage.from_(PHOTO_BUCKET).remove([f"avatars/{user_id}/avatar.jpg"])
+    thumb_store().pop(f"avatar:{user_id}", None)
+
+
+def show_avatar(client: Client, user_id: str, name: str, width: int = 96) -> None:
+    data = avatar_bytes(client, user_id)
+    if data:
+        st.image(data, width=width)
+    else:
+        st.markdown(f"<div class='avatar-ph'>{escape((name or '?')[:1].upper())}</div>", unsafe_allow_html=True)
+
+
+HERO_SECONDS = 7
+
+
+def _fetch_hero(client: Client, store: dict, property_id: str) -> None:
+    from PIL import Image, ImageOps
+
+    key = f"hero:{property_id}"
+    try:
+        bucket = client.storage.from_(PHOTO_BUCKET)
+        objects = bucket.list(property_id, {"limit": 5, "sortBy": {"column": "name", "order": "asc"}}) or []
+        first = next((o for o in objects if o.get("id")), None)
+        encoded = None
+        if first:
+            image = ImageOps.exif_transpose(Image.open(io.BytesIO(bucket.download(f"{property_id}/{first['name']}")))).convert("RGB")
+            image = ImageOps.fit(image, (1200, 480), method=Image.LANCZOS)
+            buffer = io.BytesIO()
+            image.save(buffer, "JPEG", quality=80)
+            encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+        store[key] = (time.time() + 900, encoded)
+    except Exception:
+        store[key] = (time.time() + 60, None)
+
+
+def ensure_heroes(client: Client, property_ids: list[str], budget: float = 7.0) -> None:
+    store = thumb_store()
+    now = time.time()
+    missing = [pid for pid in property_ids if f"hero:{pid}" not in store or store[f"hero:{pid}"][0] < now]
+    if not missing:
+        return
+    pool = ThreadPoolExecutor(max_workers=6)
+    try:
+        wait_futures([pool.submit(_fetch_hero, client, store, pid) for pid in missing], timeout=budget)
+    finally:
+        pool.shutdown(wait=False)
+
+
+def hero_step(delta: int, count: int) -> None:
+    st.session_state["hero_index"] = (st.session_state.get("hero_index", 0) + delta) % max(count, 1)
+    st.session_state["hero_changed"] = time.time()
+
+
+def hero_banner(client: Client, properties: pd.DataFrame) -> None:
+    if properties.empty or "status" not in properties:
+        return
+    candidates = properties[properties.status == "Aktif"]
+    if "created_at" in candidates:
+        candidates = candidates.sort_values("created_at", ascending=False)
+    candidates = candidates.head(10).to_dict("records")
+    if not candidates:
+        return
+    ensure_heroes(client, [str(c["id"]) for c in candidates])
+    store = thumb_store()
+    slides = [(c, (store.get(f"hero:{c['id']}") or (0, None))[1]) for c in candidates]
+    slides = ([s for s in slides if s[1]] or slides)[:6]
+    fallback = "data:image/svg+xml;base64," + base64.b64encode(DEFAULT_PROPERTY_IMAGE.read_bytes()).decode("ascii") if DEFAULT_PROPERTY_IMAGE.exists() else ""
+
+    def render() -> None:
+        count = len(slides)
+        if time.time() - st.session_state.get("hero_changed", 0) >= HERO_SECONDS and count > 1:
+            hero_step(1, count)
+        index = st.session_state.get("hero_index", 0) % count
+        item, encoded = slides[index]
+        image_url = f"data:image/jpeg;base64,{encoded}" if encoded else fallback
+        badge = escape(_tr_upper(f"{_clean(item.get('deal_type'))} {_clean(item.get('property_category')) or 'Daire'}").strip())
+        price = int(float(item.get("price") or 0))
+        area = _clean(item.get("area_m2"))
+        meta = " · ".join(part for part in (_clean(item.get("rooms")), f"{area} m²" if area else "") if part)
+        st.markdown(
+            f"<div class='hero' style=\"background-image:url('{image_url}')\"><div class='hero-shade'></div><div class='hero-body'>"
+            f"<span class='hero-badge'>{badge}</span><div class='hero-title'>{escape(_clean(item.get('title')) or 'İlan')}</div>"
+            f"<div class='hero-meta'><span class='hero-price'>{money_text(price) + ' ₺' if price else 'Fiyat sorunuz'}</span>"
+            f"📍 {escape(_clean(item.get('district')))}, {escape(_clean(item.get('city')))}{' · ' + escape(meta) if meta else ''}</div></div></div>",
+            unsafe_allow_html=True,
+        )
+        with st.container(key="hero_controls"):
+            c1, c2, c3 = st.columns([1, 6, 1], vertical_alignment="center")
+            c1.button("‹", key="hero_prev", use_container_width=True, on_click=hero_step, args=(-1, count))
+            if c2.button("İlanı aç", key="hero_open", type="primary", use_container_width=True):
+                open_property(str(item["id"]))
+                st.rerun()
+            c3.button("›", key="hero_next", use_container_width=True, on_click=hero_step, args=(1, count))
+        if count > 1:
+            st.markdown("<div class='hero-dots'>" + " ".join("●" if i == index else "○" for i in range(count)) + "</div>", unsafe_allow_html=True)
+
+    if hasattr(st, "fragment") and len(slides) > 1:
+        st.fragment(run_every=HERO_SECONDS)(render)()
+    else:
+        render()
 
 
 def select_employee(employee_id: str) -> None:
@@ -2665,6 +2950,27 @@ def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.Dat
         job = st.text_input("Ünvan / görev", value=_clean(mine.get("job_title")), key="profile_job", placeholder="Örn. Gayrimenkul danışmanı")
         phone = st.text_input("Telefon", value=_clean(mine.get("phone")), key="profile_phone")
         bio = st.text_area("Hakkımda", value=_clean(mine.get("bio")), height=100, key="profile_bio", placeholder="Uzmanlık alanlarınız, çalıştığınız bölgeler, kısa tanıtım…")
+        p1, p2 = st.columns([1, 3], vertical_alignment="center")
+        with p1:
+            show_avatar(client, user_id, _clean(mine.get("name")), 96)
+        with p2:
+            photo = st.file_uploader("Profil fotoğrafı", type=["jpg", "jpeg", "png", "webp"], key="profile_photo")
+            q1, q2 = st.columns(2)
+            if q1.button("Fotoğrafı kaydet", disabled=not photo, key="profile_photo_save", use_container_width=True):
+                try:
+                    save_avatar(client, user_id, photo)
+                    st.success("Profil fotoğrafınız güncellendi.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error("Fotoğraf yüklenemedi. Streamlit Secrets'ta service_role_key tanımlı olmalı.")
+                    st.caption(str(exc))
+            if q2.button("Fotoğrafı kaldır", disabled=avatar_bytes(client, user_id) is None, key="profile_photo_remove", use_container_width=True):
+                try:
+                    remove_avatar(client, user_id)
+                    st.rerun()
+                except Exception as exc:
+                    st.error("Fotoğraf kaldırılamadı.")
+                    st.caption(str(exc))
         if st.button("Profili kaydet", type="primary", key="profile_save"):
             try:
                 service_client(client).table("profiles").update({"job_title": job.strip(), "phone": phone.strip(), "bio": bio.strip()}).eq("id", user_id).execute()
@@ -2690,7 +2996,11 @@ def employee_summary_tab(client: Client, staff: pd.DataFrame, properties: pd.Dat
             if _clean(row.get("phone")):
                 lines.append(f"📞 {escape(_clean(row.get('phone')))}")
             lines.append(escape(_clean(row.get("bio")) or "Bu çalışan henüz kendisi hakkında bilgi eklememiş.").replace("\n", "<br>"))
-            st.markdown("<div class='price-card'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
+            card_img, card_text = st.columns([1, 5], vertical_alignment="center")
+            with card_img:
+                show_avatar(client, selected, str(row["name"]), 96)
+            with card_text:
+                st.markdown("<div class='price-card'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
             if selected != user_id:
                 with st.expander(f"✉️ {row['name']} kişisine mesaj gönder"):
                     compose_message_form(client, user_id, staff, f"profile_{selected}", default_recipient=selected, lock_recipient=True)
@@ -2832,50 +3142,56 @@ def advanced_search_tab(client: Client, properties: pd.DataFrame, user_id: str, 
         flag_names = {"balcony": "balcony", "elevator": "elevator", "furnished": "furnished", "within_complex": "complex", "loan_eligible": "loan", "swap_allowed": "swap"}
         flag_labels = {"balcony": "Balkon", "elevator": "Asansör", "furnished": "Eşyalı", "within_complex": "Site içinde", "loan_eligible": "Krediye uygun", "swap_allowed": "Takas"}
         flags = {column: r6[index].checkbox(flag_labels[column], key=K(flag_names[column])) for index, column in enumerate(flag_names)}
+        filters = {
+            "text": text, "deal": deals, "category": categories, "status": statuses, "city": cities, "district": districts, "rooms": rooms, "owner": owners,
+            "price_min": price_min, "price_max": price_max, "area_min": area_min, "area_max": area_max, "age": ages, "floor": floors, "heating": heating,
+            "parking": parking, "usage": usage, "deed": deeds, "sort": sort_choice, **{flag_names[column]: value for column, value in flags.items()},
+        }
+        st.divider()
+        n1, n2 = st.columns([3, 1], vertical_alignment="bottom")
+        search_name = n1.text_input("Bu aramayı kaydet", key="saved_search_name", placeholder="Arama adı yazın, örn. Meram 3+1 satılık")
+        if n2.button("Aramayı kaydet", type="primary", key="saved_search_save", use_container_width=True):
+            if not search_name.strip():
+                st.error("Aramaya bir ad verin.")
+            else:
+                try:
+                    client.table("saved_searches").insert({"user_id": user_id, "name": search_name.strip(), "filters": filters}).execute()
+                    st.success("Arama kaydedildi; aşağıdaki “Kayıtlı aramalarım” bölümünden tekrar kullanabilirsiniz.")
+                except Exception as exc:
+                    feature_setup_message("Kayıtlı aramalar", exc)
 
-    filters = {
-        "text": text, "deal": deals, "category": categories, "status": statuses, "city": cities, "district": districts, "rooms": rooms, "owner": owners,
-        "price_min": price_min, "price_max": price_max, "area_min": area_min, "area_max": area_max, "age": ages, "floor": floors, "heating": heating,
-        "parking": parking, "usage": usage, "deed": deeds, "sort": sort_choice, **{flag_names[column]: value for column, value in flags.items()},
-    }
-    with st.expander("💾 Kayıtlı aramalar"):
+    with st.expander("💾 Kayıtlı aramalarım"):
         try:
             saved = load_saved_searches(client, user_id)
         except Exception as exc:
             feature_setup_message("Kayıtlı aramalar", exc)
             saved = None
         if saved is not None:
-            n1, n2 = st.columns([3, 1], vertical_alignment="bottom")
-            search_name = n1.text_input("Arama adı", key="saved_search_name", placeholder="Örn. Meram 3+1 satılık")
-            if n2.button("Aramayı kaydet", type="primary", key="saved_search_save", use_container_width=True):
-                if not search_name.strip():
-                    st.error("Aramaya bir ad verin.")
-                else:
-                    client.table("saved_searches").insert({"user_id": user_id, "name": search_name.strip(), "filters": filters}).execute()
-                    st.success("Arama kaydedildi.")
-                    st.rerun()
-            if saved:
-                labels = {str(s["id"]): s["name"] for s in saved}
-                chosen = st.selectbox("Kayıtlı aramalarım", list(labels), format_func=labels.get, key="saved_search_choice")
-                item = next(s for s in saved if str(s["id"]) == chosen)
-                b1, b2, b3, b4 = st.columns(4)
-                b1.button("Uygula", type="primary", key="saved_search_apply", use_container_width=True, on_click=apply_saved_search, args=(item.get("filters") or {},))
-                if b2.button("Filtrelerle güncelle", key="saved_search_update", use_container_width=True):
-                    client.table("saved_searches").update({"filters": filters, "updated_at": now_tr().isoformat()}).eq("id", chosen).execute()
-                    st.success("Kayıtlı arama güncellendi.")
-                    st.rerun()
-                if b3.button("Adı değiştir", key="saved_search_rename", use_container_width=True, help="Üstteki 'Arama adı' kutusuna yazdığınız yeni ad kullanılır."):
-                    if not search_name.strip():
-                        st.error("Önce 'Arama adı' kutusuna yeni adı yazın.")
-                    else:
-                        client.table("saved_searches").update({"name": search_name.strip(), "updated_at": now_tr().isoformat()}).eq("id", chosen).execute()
-                        st.rerun()
-                confirm = st.checkbox("Silmeyi onaylıyorum", key="saved_search_confirm")
-                if b4.button("Sil", key="saved_search_delete", disabled=not confirm, use_container_width=True):
-                    client.table("saved_searches").delete().eq("id", chosen).execute()
-                    st.rerun()
+            if not saved:
+                st.caption("Henüz kayıtlı aramanız yok. Filtreleri ayarlayıp yukarıdan kaydedebilirsiniz.")
             else:
-                st.caption("Henüz kayıtlı aramanız yok. Filtreleri ayarlayıp ad vererek kaydedin.")
+                labels = {str(s["id"]): s["name"] for s in saved}
+                chosen = st.selectbox("Kayıtlı arama", list(labels), format_func=labels.get, key="saved_search_choice")
+                item = next(s for s in saved if str(s["id"]) == chosen)
+                b1, b2, b3 = st.columns(3)
+                b1.button("Uygula", type="primary", key="saved_search_apply", use_container_width=True, on_click=apply_saved_search, args=(item.get("filters") or {},))
+                edit_open = b2.toggle("Düzenle", key=f"saved_search_edit_{chosen}")
+                delete_open = b3.toggle("Sil", key=f"saved_search_del_{chosen}")
+                if edit_open:
+                    new_name = st.text_input("Arama adı", value=item["name"], key=f"saved_search_newname_{chosen}")
+                    replace_filters = st.checkbox("Kayıtlı filtreleri şu anki filtrelerle değiştir", key=f"saved_search_replace_{chosen}")
+                    if st.button("Değişiklikleri kaydet", key=f"saved_search_update_{chosen}", use_container_width=True):
+                        values = {"name": new_name.strip() or item["name"], "updated_at": now_tr().isoformat()}
+                        if replace_filters:
+                            values["filters"] = filters
+                        client.table("saved_searches").update(values).eq("id", chosen).execute()
+                        st.rerun()
+                if delete_open:
+                    st.warning(f"“{item['name']}” kayıtlı araması silinecek.")
+                    if st.button("Aramayı sil", key=f"saved_search_delete_{chosen}", use_container_width=True):
+                        client.table("saved_searches").delete().eq("id", chosen).execute()
+                        st.rerun()
+
 
     frame = properties.copy()
     frame["_price"] = pd.to_numeric(frame.get("price"), errors="coerce").fillna(0)
@@ -3097,6 +3413,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
             elif view_mode == "💹 Fiyat değişimleri":
                 price_changes_view(client, properties)
             else:
+                hero_banner(client, properties)
                 f1, f2, f3 = st.columns([3, 1.3, 1.3])
                 search = f1.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
                 deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
@@ -3110,7 +3427,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
                 if status_filter != "Tümü":
                     view = view[view.status == status_filter]
                 st.caption(f"{len(view)} ilan · detay için satıra dokunun")
-                render_property_rows(client, view.to_dict("records"), "list", height=440, favorites=favorites)
+                render_property_rows(client, view.to_dict("records"), "list", height=360, favorites=favorites)
     with tab_by_name["Detaylı arama"]:
         advanced_search_tab(client, properties, current_id, favorites)
     with tab_by_name["Müşteri talepleri"]:
