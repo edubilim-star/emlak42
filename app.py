@@ -84,7 +84,7 @@ button[role="tab"][aria-selected="true"], button[role="tab"][aria-selected="true
 .st-key-home_title button p { font-size: 1.15rem; font-weight: 700; margin: 0; line-height: 1.2; }
 .st-key-home_title button:hover { background: #1d4ed8 !important; }
 .st-key-deal_agent_card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem 1rem .9rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); text-align: center; }
-.st-key-agent_card { position: relative; border-top: 1px solid #e4e7ec; padding-top: .8rem; cursor: pointer; }
+.st-key-agent_card { position: relative; margin-top: 1.2rem; border-top: 1px solid #e4e7ec; padding-top: 1.2rem; cursor: pointer; }
 .agent-card { text-align: center; }
 .agent-card .agent-img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .5rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
 .agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; color: #1e3a8a !important; }
