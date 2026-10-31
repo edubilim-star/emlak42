@@ -72,24 +72,53 @@ button[role="tab"] { padding-top: .35rem; padding-bottom: .35rem; }
   h1 { font-size: 1.5rem !important; }
   h2 { font-size: 1.25rem !important; }
 }
-.st-key-home_title button { background: #1e3a8a !important; border: 0 !important; border-radius: 12px !important; padding: .5rem 1.1rem !important; min-height: 44px !important; box-shadow: none !important; }
-.st-key-home_title button, .st-key-home_title button * { color: #ffffff !important; }
-.st-key-home_title button p { font-size: 1.15rem; font-weight: 700; margin: 0; line-height: 1.2; }
-.st-key-home_title button:hover { background: #1d4ed8 !important; }
+.st-key-topbar { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: .5rem 1rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); }
+.st-key-topbar button { background: none !important; border: 0 !important; box-shadow: none !important; min-height: 0 !important; padding: .3rem .6rem !important; }
+.st-key-topbar button, .st-key-topbar button * { color: #334155 !important; }
+.st-key-topbar button p { font-weight: 600; font-size: .95rem; margin: 0; }
+.st-key-topbar button:hover, .st-key-topbar button:hover * { color: #0284c7 !important; }
+.st-key-brand { position: relative; }
+.st-key-brand .brand { display: flex; align-items: center; gap: .55rem; padding: .15rem 0; }
+.st-key-brand .brand-logo { font-size: 1.7rem; line-height: 1; }
+.st-key-brand .brand-text { font-size: 1.3rem; font-weight: 800; color: #0f172a !important; line-height: 1.1; }
+.st-key-brand .brand-text b { color: #0284c7 !important; }
+.st-key-home_title { position: absolute; inset: 0; z-index: 5; }
+.st-key-home_title button { width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
+@media (max-width: 760px) {
+  .st-key-topbar div[data-testid="stHorizontalBlock"] { flex-direction: row !important; flex-wrap: wrap !important; gap: .15rem !important; align-items: center !important; }
+  .st-key-topbar div[data-testid="stHorizontalBlock"] > div { width: auto !important; flex: 0 0 auto !important; min-width: 0 !important; }
+  .st-key-topbar div[data-testid="stHorizontalBlock"] > div:first-child { flex: 1 1 100% !important; }
+  .st-key-brand .brand-text { font-size: 1.1rem; }
+}
+.st-key-agent_card { position: relative; }
+.agent-card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem .8rem; text-align: center; box-shadow: 0 2px 10px rgba(16,24,40,.05); }
+.agent-card .agent-img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .55rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
+.agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2.1rem; font-weight: 700; color: #1e3a8a !important; }
+.agent-card .agent-name { font-size: 1.15rem; font-weight: 800; color: #0f172a !important; }
+.agent-card .agent-role { font-size: .82rem; color: #64748b !important; margin-top: .1rem; }
+.st-key-agent_open { position: absolute; inset: 0; z-index: 5; }
+.st-key-agent_open button { width: 100% !important; height: 100% !important; opacity: 0; cursor: pointer; }
+.st-key-agent_call a { background: #ff4d4f !important; border: 0 !important; border-radius: 12px !important; font-weight: 700; }
+.st-key-agent_call a, .st-key-agent_call a * { color: #ffffff !important; }
+.info-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: .6rem; margin-top: .7rem; }
+.info-tile { background: #f9fafb; border: 1px solid #e4e7ec; border-radius: 12px; padding: .7rem .4rem; text-align: center; }
+.info-tile .it-icon { font-size: 1.4rem; line-height: 1.2; }
+.info-tile .it-label { font-weight: 700; font-size: .84rem; color: #0f172a !important; margin-top: .2rem; }
+.info-tile .it-value { font-size: .82rem; color: #64748b !important; margin-top: .1rem; }
 [class*="st-key-listing_row_"] button { text-align: left; min-height: 46px; padding: .35rem .8rem; white-space: normal; font-size: .9rem; }
-.summary-strip { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
+.summary-strip { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-start; margin: .5rem 0 .2rem; }
 .summary-strip .chip { background: #fff; border: 1px solid #e4e7ec; border-radius: 999px; padding: .2rem .75rem; font-size: .82rem; color: #475467 !important; }
 .summary-strip .chip b { color: #101828 !important; font-size: 1rem; margin-left: .35rem; }
 @media (max-width: 760px) { .summary-strip { justify-content: flex-start; } }
 .price-card { background: #fff; border: 1px solid #e4e7ec; border-radius: 12px; padding: .6rem .9rem; line-height: 1.45; font-size: .9rem; color: #101828 !important; }
 .price-card .price { font-size: 1.7rem; font-weight: 800; color: #1d4ed8; line-height: 1.2; }
-.deal-card { background: linear-gradient(135deg, #1e3a8a, #2563eb); border-radius: 14px; padding: .85rem 1rem; box-shadow: 0 4px 14px rgba(30,58,138,.25); }
+.deal-card { text-align: center; background: linear-gradient(135deg, #1e3a8a, #2563eb); border-radius: 14px; padding: .85rem 1rem; box-shadow: 0 4px 14px rgba(30,58,138,.25); }
 .deal-card, .deal-card * { color: #ffffff !important; }
-.deal-card .dc-top { display: flex; justify-content: space-between; align-items: center; gap: .5rem; }
+.deal-card .dc-top { display: flex; flex-direction: column; align-items: center; gap: .4rem; }
 .deal-card .dc-price { font-size: 1.65rem; font-weight: 800; line-height: 1.15; }
 .deal-card .dc-price.muted { font-size: 1.05rem; font-weight: 600; opacity: .85; }
 .deal-card .dc-status { font-size: .74rem; font-weight: 700; padding: .2rem .7rem; border-radius: 999px; white-space: nowrap; }
-.deal-card .dc-chips { display: flex; flex-wrap: wrap; gap: .35rem; margin: .6rem 0 .5rem; }
+.deal-card .dc-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: .35rem; margin: .6rem 0 .5rem; }
 .deal-card .dc-chip { background: rgba(255,255,255,.18); border-radius: 999px; padding: .15rem .7rem; font-size: .8rem; }
 .deal-card .dc-row { font-size: .88rem; margin-top: .22rem; }
 .hero { position: relative; height: 230px; border-radius: 16px; overflow: hidden; background-size: cover; background-position: center; background-color: #1e293b; }
@@ -504,6 +533,9 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
         else:
             st.image(str(DEFAULT_PROPERTY_IMAGE), width="stretch", alt="İlan için varsayılan fotoğraf")
             st.caption("Bu ilana henüz fotoğraf eklenmemiş.")
+        tiles = info_tiles_html(property_row)
+        if tiles:
+            st.markdown(tiles, unsafe_allow_html=True)
     with right:
         price_value = int(float(property_row.get("price") or 0))
         status_text = _clean(property_row.get("status")) or "Aktif"
@@ -518,6 +550,22 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
             f"<div class='dc-row'>👤 Sorumlu: <b>{escape(_clean(property_row.get('sorumlu')) or 'Atanmamış')}</b></div></div>",
             unsafe_allow_html=True,
         )
+        owner_id = str(property_row.get("owner_id"))
+        agent = staff[staff.id.astype(str) == owner_id]
+        if not agent.empty:
+            person = agent.iloc[0]
+            avatar = avatar_bytes(client, owner_id)
+            if avatar:
+                image_html = f"<img class='agent-img' src='data:image/jpeg;base64,{base64.b64encode(avatar).decode('ascii')}'>"
+            else:
+                image_html = f"<div class='agent-img ph'>{escape(str(person['name'])[:1].upper())}</div>"
+            with st.container(key="agent_card"):
+                st.markdown(f"<div class='agent-card'>{image_html}<div class='agent-name'>{escape(str(person['name']))}</div><div class='agent-role'>{escape(_clean(person.get('job_title')) or 'Gayrimenkul Danışmanı')}</div></div>", unsafe_allow_html=True)
+                st.button("Danışman sayfasını aç", key="agent_open", on_click=open_employee, args=(owner_id,))
+            digits = "".join(ch for ch in _clean(person.get("phone")) if ch.isdigit() or ch == "+")
+            if digits:
+                with st.container(key="agent_call"):
+                    st.link_button("📞 Hemen Ara / İletişime Geç", f"tel:{digits}", use_container_width=True)
         detail_rows = [
             ("Brüt / net m²", f"{property_row.get('area_m2') or '—'} / {property_row.get('net_area_m2') or '—'}"),
             ("Bina yaşı", property_row.get("building_age")),
@@ -542,8 +590,9 @@ def show_property_detail(client: Client, property_row: pd.Series, user_id: str, 
         table_rows = "".join(f"<tr><th>{escape(str(label))}</th><td>{escape(str(value))}</td></tr>" for label, value in detail_rows)
         st.markdown(f"<table class='property-feature-table'>{table_rows}</table>", unsafe_allow_html=True)
 
+    tab_icons = {"Açıklama": "📝", "Konum": "📍", "Fotoğraflar": "🖼️", "İlan teklifleri": "💰", "Mesaj": "✉️", "İndir ve paylaş": "📤", "Düzenle": "✏️", "Sil": "🗑️"}
     tab_names = ["Açıklama", "Konum", "Fotoğraflar", "İlan teklifleri", "Mesaj", "İndir ve paylaş"] + (["Düzenle", "Sil"] if manage else [])
-    detail_tabs = dict(zip(tab_names, st.tabs(tab_names)))
+    detail_tabs = dict(zip(tab_names, st.tabs([f"{tab_icons[name]} {name}" for name in tab_names])))
     with detail_tabs["Açıklama"]:
         st.write(property_row.get("description") or property_row.get("notes") or "Bu ilan için açıklama girilmemiş.")
         with st.expander("📈 Fiyat geçmişi"):
@@ -1770,6 +1819,53 @@ def ensure_thumbs(client: Client, property_ids: list[str], budget: float = 6.0, 
         pool.shutdown(wait=False)
 
 
+def open_employee(employee_id: str) -> None:
+    st.session_state["summary_employee"] = str(employee_id)
+    st.session_state["pending_tab"] = "Çalışan özeti"
+    st.session_state["goto_nonce"] = st.session_state.get("goto_nonce", 0) + 1
+
+
+def show_deal(deal: str) -> None:
+    st.session_state["list_deal_filter"] = deal
+    st.session_state["daire_view"] = "Tüm ilanlar"
+    go_to_section("Daireler")
+
+
+def info_tiles_html(row: pd.Series) -> str:
+    def value(name: str) -> str:
+        text = _clean(row.get(name))
+        return "" if text in ("Belirtilmemiş", "Belirtilmedi", "0") and name != "building_age" else text
+
+    def flag(name: str) -> bool:
+        item = row.get(name)
+        return bool(item) and not (isinstance(item, float) and pd.isna(item))
+
+    dues = pd.to_numeric(row.get("monthly_dues"), errors="coerce")
+    floor, age = value("floor"), value("building_age")
+    rooms = value("rooms")
+    tiles = [
+        ("🚪", "Oda Sayısı", rooms if (not rooms or "Oda" in rooms) else f"{rooms} Oda"),
+        ("📐", "Brüt Alan", f"{value('area_m2')} m²" if value("area_m2") else ""),
+        ("📏", "Net Alan", f"{value('net_area_m2')} m²" if value("net_area_m2") else ""),
+        ("🏗️", "Bina Yaşı", ("0 (Yeni)" if age == "0" else f"{age} Yıl") if age else ""),
+        ("🏢", "Bulunduğu Kat", (f"{floor}. Kat" if floor.isdigit() else floor) if floor else ""),
+        ("🔥", "Isıtma", value("heating")),
+        ("🚿", "Banyo", value("bathroom_count")),
+        ("🍳", "Mutfak", value("kitchen")),
+        ("🚗", "Otopark", value("parking") if value("parking") != "Yok" else ""),
+        ("🌇", "Balkon", "Var" if flag("balcony") else ""),
+        ("🛗", "Asansör", "Var" if flag("elevator") else ""),
+        ("🛋️", "Eşya Durumu", "Eşyalı" if flag("furnished") else ""),
+        ("🏘️", "Site", (value("complex_name") or "Site içinde") if flag("within_complex") else ""),
+        ("💳", "Aylık Aidat", f"{money_text(dues)} ₺" if pd.notna(dues) and dues > 0 else ""),
+        ("📜", "Tapu Durumu", value("title_deed_status")),
+        ("🏦", "Kredi", "Krediye Uygun" if flag("loan_eligible") else ""),
+        ("🔄", "Takas", "Değerlendirilir" if flag("swap_allowed") else ""),
+    ]
+    cells = "".join(f"<div class='info-tile'><div class='it-icon'>{icon}</div><div class='it-label'>{escape(label)}</div><div class='it-value'>{escape(text)}</div></div>" for icon, label, text in tiles if text)
+    return f"<div class='info-tiles'>{cells}</div>" if cells else ""
+
+
 def open_property(property_id: str) -> None:
     st.session_state["selected_property_id"] = str(property_id)
     st.session_state["pending_tab"] = "Daireler"
@@ -2570,7 +2666,7 @@ def _draw_note(canvas, text: str, color: str) -> None:
     from PIL import Image, ImageDraw
 
     width, height = canvas.size
-    note_w, note_h, margin = int(width * 0.40), int(height * 0.31), 50
+    note_w, note_h, margin = int(width * 0.30), int(height * 0.22), 50
     layer = Image.new("RGBA", (note_w + 2 * margin, note_h + 2 * margin), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     paper = _hex_rgb(color)
@@ -2683,20 +2779,19 @@ body{margin:0;font-family:system-ui,sans-serif}
 button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;margin-bottom:8px}
 .main{background:#25D366;color:#fff}
 .row{display:flex;gap:8px}
-.row button{background:#e8f5e9;color:#14532d;padding:10px}
+.row button{background:#e8f5e9;color:#14532d;padding:10px;font-size:13px}
 #msg{margin-top:2px;font-size:13px;color:#475467}
 </style></head><body>
-<button id="files" class="main" type="button">① Önce kolajı paylaş (resimler)</button>
-<button id="textonly" class="main" type="button">② Sonra bilgi metnini paylaş</button>
-<div class="row"><button id="all" type="button">Resim + metin birlikte</button><button id="copy" type="button">Metni kopyala</button></div>
+<button id="seq" class="main" type="button">📲 Resim + mesaj gönder (önce resim, sonra mesaj)</button>
+<div class="row"><button id="files" type="button">Yalnızca resim</button><button id="textonly" type="button">Yalnızca mesaj</button><button id="copy" type="button">Metni kopyala</button></div>
 <div id="msg"></div>
 <script>
 const files64 = __FILES__; const text = __TEXT__;
-const msg = document.getElementById("msg");
+const msg = document.getElementById("msg"); const seq = document.getElementById("seq");
+const seqLabel = seq.textContent; let step = 0;
 if (!files64.length) {
-  document.getElementById("files").style.display = "none";
-  document.getElementById("all").style.display = "none";
-  document.getElementById("textonly").textContent = "Bilgi metnini paylaş";
+  seq.style.display = "none"; document.getElementById("files").style.display = "none";
+  document.getElementById("textonly").textContent = "Mesajı paylaş";
 }
 function makeFiles() {
   return files64.map((b64, i) => {
@@ -2710,10 +2805,10 @@ async function tryShare(data) {
   try { navs.push(window.parent.navigator); } catch (e) {}
   for (const nav of navs) {
     try {
-      if (nav.share && (!data.files || (nav.canShare && nav.canShare(data)))) { await nav.share(data); return true; }
-    } catch (e) { if (e && e.name === "AbortError") return true; }
+      if (nav.share && (!data.files || (nav.canShare && nav.canShare(data)))) { await nav.share(data); return "ok"; }
+    } catch (e) { if (e && e.name === "AbortError") return "abort"; }
   }
-  return false;
+  return "no";
 }
 async function copyText() {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
@@ -2729,27 +2824,34 @@ function download(files) {
   });
 }
 function openWhatsApp() { window.open("https://wa.me/?text=" + encodeURIComponent(text), "_blank"); }
+async function shareText() {
+  const result = await tryShare({text: text});
+  if (result !== "no") return result;
+  const copied = await copyText();
+  msg.textContent = copied ? "Mesaj kopyalandı; WhatsApp'ta yapıştırabilirsiniz." : "";
+  openWhatsApp();
+  return "fallback";
+}
+seq.onclick = async () => {
+  if (step === 0) {
+    const files = makeFiles();
+    const result = await tryShare({files: files});
+    if (result === "ok") { step = 1; seq.textContent = "② Şimdi mesajı gönder ➜"; msg.textContent = "Resim hazır. Şimdi aynı düğmeye tekrar dokunup mesajı gönderin."; return; }
+    if (result === "abort") return;
+    download(files); await copyText();
+    msg.textContent = "Resimler indirildi, mesaj kopyalandı. WhatsApp'ta önce resimleri ekleyin, sonra mesajı yapıştırın.";
+  } else {
+    const result = await shareText();
+    if (result === "ok" || result === "fallback") { step = 0; seq.textContent = seqLabel; if (result === "ok") msg.textContent = "Tamamlandı."; }
+  }
+};
 document.getElementById("files").onclick = async () => {
   const files = makeFiles();
-  if (await tryShare({files: files})) { msg.textContent = "Şimdi ② ile bilgi metnini gönderin."; return; }
-  download(files);
-  msg.textContent = "Resimler indirildi. WhatsApp'ta sohbeti seçip ekleyin, sonra ② ile bilgi metnini gönderin.";
+  if ((await tryShare({files: files})) === "no") { download(files); msg.textContent = "Resimler indirildi; WhatsApp'ta sohbeti seçip ekleyin."; }
 };
-document.getElementById("textonly").onclick = async () => {
-  if (await tryShare({text: text})) return;
-  const copied = await copyText();
-  msg.textContent = copied ? "Metin kopyalandı; WhatsApp'ta yapıştırabilirsiniz." : "";
-  openWhatsApp();
-};
-document.getElementById("all").onclick = async () => {
-  const files = makeFiles();
-  if (await tryShare({files: files, text: text})) return;
-  download(files);
-  await copyText();
-  msg.textContent = "Resimler indirildi, metin kopyalandı. WhatsApp'ta resimleri ekleyip metni yapıştırın.";
-};
+document.getElementById("textonly").onclick = shareText;
 document.getElementById("copy").onclick = async () => {
-  msg.textContent = (await copyText()) ? "Metin kopyalandı." : "Kopyalanamadı; metni yukarıdaki kutudan elle kopyalayın.";
+  msg.textContent = (await copyText()) ? "Mesaj kopyalandı." : "Kopyalanamadı; metni yukarıdaki kutudan elle kopyalayın.";
 };
 </script></body></html>"""
 
@@ -2799,7 +2901,7 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
             except Exception as exc:
                 st.error("Paylaşım resmi hazırlanamadı.")
                 st.caption(str(exc))
-        st.caption("Önce paylaşım resmi hazırlanır. Ardından önce ① ile kolajı, sonra ② ile bilgi metnini WhatsApp'ta gönderirsiniz.")
+        st.caption("Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle önce resim, sonra mesaj WhatsApp'ta gönderilir.")
     else:
         st.image(base64.b64decode(prepared["files"][0]), width=300, caption="Paylaşılacak ana resim")
         embed_html(WHATSAPP_HTML.replace("__FILES__", json.dumps(prepared["files"])).replace("__TEXT__", json.dumps(caption).replace("</", "<\\/")), 190)
@@ -3355,11 +3457,22 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
         requests = requests[requests.owner_id == user.id] if not requests.empty else requests
     active = int((properties.status == "Aktif").sum()) if not properties.empty else 0
     new_requests = int((requests.status == "Yeni").sum()) if not requests.empty else 0
-    head_left, head_right = st.columns([2, 3], vertical_alignment="center")
-    if head_left.button(f"🏠 {home_title}", key="home_title", help="Daireler bölümüne git"):
-        go_to_section("Daireler")
-        st.rerun()
-    head_right.markdown(
+    agenda_badge = f" ({len(due_reminders) + len(today_reminders)})" if (due_reminders or today_reminders) else ""
+    message_badge = f" ({unread_messages})" if unread_messages else ""
+    with st.container(key="topbar"):
+        nav = st.columns([4, 1, 1, 1.5, 1.2, 1.4], vertical_alignment="center")
+        with nav[0]:
+            with st.container(key="brand"):
+                words = home_title.split()
+                first, second = (" ".join(words[:-1]), words[-1]) if len(words) > 1 else (home_title[:-2], home_title[-2:])
+                st.markdown(f"<div class='brand'><span class='brand-logo'>🏠</span><span class='brand-text'>{escape(first)} <b>{escape(second)}</b></span></div>", unsafe_allow_html=True)
+                st.button(home_title, key="home_title", on_click=go_to_section, args=("Daireler",), help="Daireler bölümüne git")
+        nav[1].button("Satılık", key="top_sale", on_click=show_deal, args=("Satılık",), use_container_width=True)
+        nav[2].button("Kiralık", key="top_rent", on_click=show_deal, args=("Kiralık",), use_container_width=True)
+        nav[3].button("Danışmanlar", key="top_agents", on_click=go_to_section, args=("Çalışan özeti",), use_container_width=True)
+        nav[4].button("Ajanda" + agenda_badge, key="top_agenda", on_click=go_to_section, args=("Ajanda",), use_container_width=True)
+        nav[5].button("Mesajlar" + message_badge, key="top_messages", on_click=go_to_section, args=("Mesajlar",), use_container_width=True)
+    st.markdown(
         f"<div class='summary-strip'><span class='chip'>Daire<b>{len(properties)}</b></span><span class='chip'>Aktif<b>{active}</b></span>"
         f"<span class='chip'>Talep<b>{len(requests)}</b></span><span class='chip'>Yeni talep<b>{new_requests}</b></span></div>",
         unsafe_allow_html=True,
@@ -3416,7 +3529,7 @@ on conflict (id) do update set name = excluded.name;""", language="sql")
                 hero_banner(client, properties)
                 f1, f2, f3 = st.columns([3, 1.3, 1.3])
                 search = f1.text_input("Dairelerde ara", placeholder="İl, ilçe veya başlık")
-                deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"])
+                deal_filter = f2.selectbox("İşlem türü", ["Tümü", "Kiralık", "Satılık"], key="list_deal_filter")
                 status_filter = f3.selectbox("Durum", ["Tümü", "Aktif", "Opsiyonlu", "Kiralandı/Satıldı", "Pasif"])
                 view = properties.copy()
                 if search:
