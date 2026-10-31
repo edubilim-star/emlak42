@@ -84,7 +84,7 @@ button[role="tab"][aria-selected="true"], button[role="tab"][aria-selected="true
 .st-key-home_title button p { font-size: 1.15rem; font-weight: 700; margin: 0; line-height: 1.2; }
 .st-key-home_title button:hover { background: #1d4ed8 !important; }
 .st-key-deal_agent_card { background: #ffffff; border: 1px solid #e4e7ec; border-radius: 16px; padding: 1rem 1rem .9rem; box-shadow: 0 2px 12px rgba(16,24,40,.06); text-align: center; }
-.st-key-agent_card { position: relative; border-top: 1px solid #e4e7ec; padding-top: .8rem; cursor: pointer; }
+.st-key-agent_card { position: relative; margin-top: 1.2rem; border-top: 1px solid #e4e7ec; padding-top: 1.2rem; cursor: pointer; }
 .agent-card { text-align: center; }
 .agent-card .agent-img { width: 84px; height: 84px; border-radius: 50%; object-fit: cover; display: block; margin: 0 auto .5rem; border: 3px solid #ffffff; box-shadow: 0 2px 10px rgba(0,0,0,.2); }
 .agent-card .agent-img.ph { background: #e0e7ff; display: flex; align-items: center; justify-content: center; font-size: 2rem; font-weight: 700; color: #1e3a8a !important; }
@@ -2858,7 +2858,7 @@ button{width:100%;padding:12px;border:0;border-radius:10px;font-size:15px;font-w
 .row button{background:#e8f5e9;color:#14532d;padding:10px;font-size:13px}
 #msg{margin-top:2px;font-size:13px;color:#475467}
 </style></head><body>
-<button id="seq" class="main" type="button">📲 Resim + mesaj gönder (önce resim, sonra mesaj)</button>
+<button id="seq" class="main" type="button">📲 Resim + mesaj gönder (tek seferde)</button>
 <div class="row"><button id="files" type="button">Yalnızca resim</button><button id="textonly" type="button">Yalnızca mesaj</button><button id="copy" type="button">Metni kopyala</button></div>
 <div id="msg"></div>
 <script>
@@ -2869,7 +2869,7 @@ if (single) {
   document.getElementById("files").style.display = "none";
   document.getElementById("textonly").textContent = "Metni ayrıca paylaş";
 }
-const seqLabel = seq.textContent; let step = 0;
+
 if (!files64.length) {
   seq.style.display = "none"; document.getElementById("files").style.display = "none";
   document.getElementById("textonly").textContent = "Mesajı paylaş";
@@ -2914,25 +2914,13 @@ async function shareText() {
   return "fallback";
 }
 seq.onclick = async () => {
-  if (single) {
-    const files = makeFiles();
-    const result = await tryShare({files: files});
-    if (result === "ok" || result === "abort") return;
-    download(files);
-    msg.textContent = "Resim indirildi. WhatsApp'ta sohbeti seçip resmi ekleyin.";
-    return;
-  }
-  if (step === 0) {
-    const files = makeFiles();
-    const result = await tryShare({files: files});
-    if (result === "ok") { step = 1; seq.textContent = "② Şimdi mesajı gönder ➜"; msg.textContent = "Resim hazır. Şimdi aynı düğmeye tekrar dokunup mesajı gönderin."; return; }
-    if (result === "abort") return;
-    download(files); await copyText();
-    msg.textContent = "Resimler indirildi, mesaj kopyalandı. WhatsApp'ta önce resimleri ekleyin, sonra mesajı yapıştırın.";
-  } else {
-    const result = await shareText();
-    if (result === "ok" || result === "fallback") { step = 0; seq.textContent = seqLabel; if (result === "ok") msg.textContent = "Tamamlandı."; }
-  }
+  const files = makeFiles();
+  const data = single ? {files: files} : {files: files, text: text};
+  const result = await tryShare(data);
+  if (result === "ok" || result === "abort") return;
+  download(files);
+  if (!single) await copyText();
+  msg.textContent = single ? "Resim indirildi. WhatsApp'ta sohbeti seçip resmi ekleyin." : "Resimler indirildi, mesaj kopyalandı. WhatsApp'ta resimleri ekleyip mesajı yapıştırın.";
 };
 document.getElementById("files").onclick = async () => {
   const files = makeFiles();
@@ -2992,7 +2980,7 @@ def whatsapp_block(row: pd.Series, facts: list[tuple[str, str]], photos: list[di
             except Exception as exc:
                 st.error("Paylaşım resmi hazırlanamadı.")
                 st.caption(str(exc))
-        st.caption("Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle WhatsApp'ta paylaşırsınız." if inline_text else "Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle önce resim, sonra mesaj WhatsApp'ta gönderilir.")
+        st.caption("Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle WhatsApp'ta paylaşırsınız." if inline_text else "Önce paylaşım resmi hazırlanır. Ardından tek düğmeyle resim ve mesaj birlikte WhatsApp'ta gönderilir.")
     else:
         st.image(base64.b64decode(prepared["files"][0]), width=340 if inline_text else 300, caption="Paylaşılacak ana resim")
         embed_html(_share_html(prepared["files"], caption, single=inline_text), 190)
